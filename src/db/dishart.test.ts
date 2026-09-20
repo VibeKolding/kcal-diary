@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { dishTokens, isBowl, tokenFor, type CatalogRecipe } from './catalog'
+import { TOKEN_BY_PRODUCT, dishTokens, isBowl, tokenFor, type CatalogRecipe } from './catalog'
 
 const recipes = (JSON.parse(readFileSync('public/data/recipes.json', 'utf8')) as {
   items: CatalogRecipe[]
@@ -65,5 +65,48 @@ describe('состав картинки блюда', () => {
     expect(isBowl(byTitle('Овсянка на воде с яблоком'))).toBe(true)
     expect(isBowl(byTitle('Бутерброды с маслом и сыром'))).toBe(false)
     expect(isBowl(byTitle('Паста с курицей и сливками'))).toBe(false)
+  })
+})
+
+/*
+ * Ловушки порядка правил.
+ *
+ * Побеждает первое подошедшее правило, а название продукта может содержать
+ * слово из чужого: «Яйцо куриное варёное» — «куриное», «Печенье овсяное» —
+ * «печень», «Сельдерей стеблевой» — «сельд». Первая из них дожила до
+ * приложения и рисовала куриную ножку на тринадцати обложках из
+ * шестидесяти трёх.
+ *
+ * Тест идёт по всем названиям из базы продуктов и из рецептов и собирает
+ * те, на которые подходит больше одного правила. Список известных и
+ * безобидных записан здесь целиком: новое совпадение уронит тест с именем
+ * продукта, и его нужно будет либо признать безобидным, либо развести
+ * правила.
+ */
+describe('правила узнавания продуктов', () => {
+  const KNOWN_AMBIGUOUS = [
+    'Ветчина куриная',        // курица вперёд мяса — это и есть курица
+    'Гречка с курицей',       // блюдо, курица главнее крупы
+    'Котлета куриная',
+    'Печень куриная тушёная',
+    'Салат Цезарь с курицей',
+    'Сгущённое молоко',       // молочное вперёд сладкого
+    'Творожный сыр',          // творожное вперёд сыра
+    'Яйцо куриное варёное',   // яйцо вперёд курицы — ради него всё и затевалось
+  ]
+
+  const foods = (JSON.parse(readFileSync('public/data/foods.json', 'utf8')) as {
+    items: { n: string }[]
+  }).items
+
+  it('на продукт не подходит несколько правил сразу', () => {
+    const names = new Set<string>([
+      ...foods.map((f) => f.n),
+      ...recipes.flatMap((r) => r.items.map((i) => i.n)),
+    ])
+    const ambiguous = [...names]
+      .filter((n) => TOKEN_BY_PRODUCT.filter(([re]) => re.test(n)).length > 1)
+      .sort()
+    expect(ambiguous).toEqual([...KNOWN_AMBIGUOUS].sort())
   })
 })

@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:css": "node scripts/check-css.mjs",
-    "check:overflow": "node scripts/check-overflow.mjs"
+    "check:screens": "node scripts/check-screens.mjs"
   },
   "dependencies": {
     "@fontsource-variable/golos-text": "^5.3.0",
