@@ -18,6 +18,7 @@ import { TextField } from '@/ui/TextField'
 import { tap } from '@/ui/haptic'
 import { useToast } from '@/ui/Toast'
 import { Icon } from '@/ui/Icon'
+import { backupIsStale, exportBackup } from '@/features/backup/backup'
 import { EntrySheet } from './EntrySheet'
 import s from './Today.module.css'
 
@@ -247,7 +248,48 @@ export function Today({ profile, onAdd }: Props) {
         </div>
       )}
 
+      <BackupNudge />
+
       <EntrySheet entry={editing} onClose={() => setEditing(null)} />
+    </div>
+  )
+}
+
+/**
+ * Напоминание о копии там, где человек находится.
+ *
+ * Копию можно было сделать и раньше — кнопка лежит в профиле. Но чтобы до
+ * неё дойти, нужно вспомнить, что она существует, и уйти с экрана, на
+ * котором ты только что записал ужин. Поэтому строка появляется прямо
+ * здесь и делает копию одним нажатием.
+ *
+ * Показывается, только когда копии нет больше недели, и исчезает сразу
+ * после нажатия: постоянная плашка «сделайте копию» перестаёт читаться
+ * на третий день.
+ */
+function BackupNudge() {
+  const [show, setShow] = useState(false)
+  const [done, setDone] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => { void backupIsStale().then(setShow) }, [])
+  if (!show || done) return null
+
+  return (
+    <div className={s.nudge}>
+      <span className={s.nudgeText}>
+        Дневник хранится только на этом телефоне. Копии нет больше недели.
+      </span>
+      <Pill
+        size="sm"
+        onClick={async () => {
+          await exportBackup()
+          setDone(true)
+          toast({ text: 'Копия сохранена в загрузки' })
+        }}
+      >
+        Сохранить
+      </Pill>
     </div>
   )
 }

@@ -125,6 +125,20 @@ export async function importBackup(file: File): Promise<ImportResult> {
   assertShape(parsed)
   const data = parsed
 
+  await saveRestorePoint()
+  await applyBackup(data)
+
+  invalidateIndex()
+  return {
+    entries: data.entries.length,
+    foods: data.foods.length,
+    weights: data.weights.length,
+  }
+}
+
+/** Заливка копии поверх текущих данных. Одной транзакцией: половина
+    восстановленного дневника хуже, чем несостоявшееся восстановление. */
+async function applyBackup(data: Backup): Promise<void> {
   await db.transaction('rw',
     [db.profile, db.foods, db.recipes, db.entries, db.weights, db.water, db.activity,
       db.notes, db.sets, db.favorites],
@@ -154,12 +168,60 @@ export async function importBackup(file: File): Promise<ImportResult> {
         db.favorites.bulkPut(data.favorites ?? []),
       ])
     })
+}
 
+/*
+ * Точка возврата перед восстановлением.
+ *
+ * Восстановление стирает всё и заливает файл. Файл может оказаться не тем:
+ * прошлогодней копией, копией с другого телефона, просто старой. Отменить
+ * это было нельзя — сегодняшний день исчезал молча и навсегда. Поэтому
+ * перед заливкой откладывается снимок текущего состояния.
+ *
+ * Снимок — тот же формат, что и файл копии, то есть вшитые продукты в него
+ * не попадают и он невелик. Всё равно ставим потолок: смысл точки возврата
+ * в том, чтобы спасти данные, а не в том, чтобы удвоить занятое место.
+ */
+const MAX_RESTORE_POINT_BYTES = 5 * 1024 * 1024
+
+interface RestorePoint {
+  at: number
+  data: Backup
+}
+
+async function saveRestorePoint(): Promise<void> {
+  const before = await buildBackup()
+  // Отменять нечего, если дневник пуст: первое восстановление на чистом
+  // телефоне — обычный сценарий, а не ошибка.
+  if (before.entries.length === 0 && before.profile.length === 0) return
+  if (JSON.stringify(before).length > MAX_RESTORE_POINT_BYTES) return
+  await setMeta(META.restorePoint, { at: Date.now(), data: before } satisfies RestorePoint)
+}
+
+/** Когда сделана точка возврата. null — отменять нечего */
+export async function restorePointAt(): Promise<number | null> {
+  const rp = await getMeta<RestorePoint | null>(META.restorePoint, null)
+  if (!rp) return null
+  // Через неделю предложение «вернуть как было» вводит в заблуждение:
+  // человек давно живёт с восстановленными данными.
+  if (Date.now() - rp.at > WEEK) {
+    await setMeta(META.restorePoint, null)
+    return null
+  }
+  return rp.at
+}
+
+/** Вернуть данные, какими они были до восстановления из файла */
+export async function undoRestore(): Promise<ImportResult> {
+  const rp = await getMeta<RestorePoint | null>(META.restorePoint, null)
+  if (!rp) throw new BackupError('Возвращать нечего: точки возврата нет.')
+  await applyBackup(rp.data)
+  await setMeta(META.restorePoint, null)
   invalidateIndex()
   return {
-    entries: data.entries.length,
-    foods: data.foods.length,
-    weights: data.weights.length,
+    entries: rp.data.entries.length,
+    foods: rp.data.foods.length,
+    weights: rp.data.weights.length,
   }
 }
 

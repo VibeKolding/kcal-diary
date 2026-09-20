@@ -68,4 +68,8 @@ export const META = {
   lastBackupAt: 'lastBackupAt',
   onboarded: 'onboarded',
   reminders: 'reminders',
+  /** Согласился ли браузер держать хранилище постоянным */
+  storagePersisted: 'storagePersisted',
+  /** Снимок данных перед восстановлением из файла — чтобы был откат */
+  restorePoint: 'restorePoint',
 } as const

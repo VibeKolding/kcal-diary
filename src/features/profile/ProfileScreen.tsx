@@ -12,7 +12,9 @@ import { exportCsv } from '@/features/backup/csv'
 import { latestWeight } from '@/db/tracking'
 import {
   BackupError, backupIsStale, exportBackup, importBackup, lastBackupAt,
+  restorePointAt, undoRestore,
 } from '@/features/backup/backup'
+import { persistState, spaceReport, type PersistState, type SpaceReport } from '@/db/persist'
 import { InstallCard } from '@/features/install/InstallCard'
 import { WeightCard } from './WeightCard'
 import { AboutCard } from './AboutCard'
@@ -41,12 +43,18 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
 
   const [stale, setStale] = useState(false)
   const [lastBackup, setLastBackup] = useState<number | null>(null)
+  const [persist, setPersist] = useState<PersistState | null>(null)
+  const [space, setSpace] = useState<SpaceReport | null>(null)
+  const [undoAt, setUndoAt] = useState<number | null>(null)
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void backupIsStale().then(setStale)
     void lastBackupAt().then(setLastBackup)
+    void persistState().then(setPersist)
+    void spaceReport().then(setSpace)
+    void restorePointAt().then(setUndoAt)
   }, [message])
 
   async function saveTargets() {
@@ -172,11 +180,47 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
             : 'Данные хранятся только на этом устройстве. Скачанный файл — единственный способ перенести дневник на другой телефон.'}
         </p>
 
+        {/* Честная строка о том, переживут ли данные нехватку места.
+            Говорим не «включите настройку», а что делать: пометку даёт
+            только вынесенное на домашний экран приложение. */}
+        {persist === 'granted' && (
+          <p className={`${s.note} ${s.ok}`} style={{ marginBottom: 'var(--s4)' }}>
+            Хранилище защищено: система не станет вычищать дневник, когда на
+            телефоне закончится место.
+          </p>
+        )}
+        {persist === 'skipped' && (
+          <p className={s.note} style={{ marginBottom: 'var(--s4)' }}>
+            Дневник открыт во вкладке браузера. Вынесите его на домашний экран —
+            тогда система перестанет считать данные временными и не тронет их
+            при нехватке места.
+          </p>
+        )}
+        {space?.tight && (
+          <p className={`${s.note} ${s.warn}`} style={{ marginBottom: 'var(--s4)' }}>
+            На устройстве почти не осталось места ({Math.round(space.free / 1024 / 1024)} МБ).
+            Освободите его и скачайте копию: при нехватке места система чистит
+            данные сайтов в первую очередь.
+          </p>
+        )}
+
         <div className={s.actions}>
           <Pill block onClick={doExport}>Скачать копию</Pill>
           <Pill block variant="ghost" onClick={() => fileRef.current?.click()}>
             Восстановить из файла
           </Pill>
+          {undoAt !== null && (
+            <Pill block variant="ghost" onClick={async () => {
+              try {
+                const r = await undoRestore()
+                setMessage({ text: `Вернули как было: ${r.entries} записей.` })
+              } catch (e) {
+                setMessage({ text: e instanceof BackupError ? e.message : 'Не получилось вернуть.', error: true })
+              }
+            }}>
+              Вернуть как было (до {new Date(undoAt).toLocaleDateString('ru-RU')})
+            </Pill>
+          )}
           <Pill block variant="quiet" onClick={async () => { await exportCsv(); setMessage({ text: 'Таблица сохранена в загрузки.' }) }}>
             Скачать таблицу CSV
           </Pill>

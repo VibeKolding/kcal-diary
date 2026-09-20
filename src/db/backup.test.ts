@@ -4,7 +4,9 @@ import { db } from './db'
 import { addFoodEntry, copyDay, entriesForDay } from './entries'
 import { createFood } from './foods'
 import { putWeight } from './tracking'
-import { buildBackup, importBackup, BackupError } from '@/features/backup/backup'
+import {
+  buildBackup, importBackup, undoRestore, restorePointAt, BackupError,
+} from '@/features/backup/backup'
 import type { Profile } from '@/domain/types'
 
 const profile: Profile = {
@@ -28,6 +30,45 @@ function asFile(data: unknown): File {
 
 describe('резервная копия', () => {
   beforeEach(reset)
+
+  /*
+   * Восстановление стирает всё и заливает файл. Файл легко перепутать —
+   * взять прошлогоднюю копию или копию с другого телефона, — и до точки
+   * возврата сегодняшний день исчезал молча и навсегда.
+   */
+  it('после восстановления можно вернуть как было', async () => {
+    await db.profile.put(profile)
+    const food = await createFood({
+      name: 'Своё блюдо', category: 'dish',
+      per100: { kcal: 300, protein: 10, fat: 10, carbs: 40 },
+    })
+    await addFoodEntry(food, 200, 'lunch', '2026-09-20')
+    expect(await entriesForDay('2026-09-20')).toHaveLength(1)
+
+    // чужая копия: другой день, другой продукт
+    await importBackup(asFile({
+      format: 'kcal-diary-backup', version: 1, exportedAt: '2020-01-01T00:00:00.000Z',
+      profile: [profile], foods: [], recipes: [], entries: [], weights: [], water: [],
+    }))
+    expect(await entriesForDay('2026-09-20')).toHaveLength(0)
+    expect(await restorePointAt()).toBeTypeOf('number')
+
+    await undoRestore()
+    expect(await entriesForDay('2026-09-20')).toHaveLength(1)
+    // второй раз возвращать уже нечего
+    expect(await restorePointAt()).toBeNull()
+    await expect(undoRestore()).rejects.toBeInstanceOf(BackupError)
+  })
+
+  /* Первое восстановление на чистом телефоне — обычный сценарий переезда,
+     а не ошибка: предлагать «вернуть как было» там не к чему. */
+  it('на пустом дневнике точка возврата не заводится', async () => {
+    await importBackup(asFile({
+      format: 'kcal-diary-backup', version: 1, exportedAt: '2026-01-01T00:00:00.000Z',
+      profile: [profile], foods: [], recipes: [], entries: [], weights: [], water: [],
+    }))
+    expect(await restorePointAt()).toBeNull()
+  })
 
   it('переживает круг экспорт → очистка → импорт', async () => {
     await db.profile.put(profile)

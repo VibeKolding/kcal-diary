@@ -21,6 +21,7 @@ import { Splash } from './Splash'
 import { Spinner } from '@/ui/Spinner'
 import { OfflineBar } from './OfflineBar'
 import { useAppUpdate } from './useAppUpdate'
+import { ensurePersistentStorage } from '@/db/persist'
 import { useReminders } from '@/features/reminders/useReminders'
 import { addWater } from '@/db/tracking'
 import { useToast } from '@/ui/Toast'
@@ -75,6 +76,15 @@ export function App() {
       })
       .finally(() => setReady(true))
   }, [])
+
+  /*
+   * Просим браузер держать хранилище постоянным. Делается один раз при
+   * запуске, молча и без окон: человек ничего не нажимает и ничего не
+   * видит. Промах не важен — без пометки приложение работает так же,
+   * просто с прежним риском, что система вычистит данные при нехватке
+   * места. Поэтому запуск на этот вызов не смотрит и его не ждёт.
+   */
+  useEffect(() => { void ensurePersistentStorage() }, [])
 
   const loading = !ready || profile === undefined
 

@@ -174,3 +174,23 @@
 }
 
 .quickRow { display: flex; gap: var(--s2); flex-wrap: wrap; }
+
+/* Напоминание о копии: тихая строка, а не плашка. Она говорит о риске,
+   который человек не создавал, поэтому не должна выглядеть упрёком. */
+.nudge {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+}
+
+.nudgeText {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-dim);
+}
