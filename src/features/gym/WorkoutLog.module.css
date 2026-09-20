@@ -1,0 +1,58 @@
+.log {
+  display: grid;
+  gap: var(--s3);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--glass-border-soft);
+}
+
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.title { font-size: var(--fs-md); font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muscle-ink); }
+.best { font-size: var(--fs-sm); font-weight: 700; color: var(--text-dim); }
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--s2);
+  align-items: end;
+}
+.saveBtn { height: var(--h-xl); padding: 0 var(--s4); }
+
+.rest {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  justify-self: start;
+  height: var(--h-md);
+  padding: 0 var(--s4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.restOn { color: var(--text); border-color: var(--steel-edge); }
+.restBar {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px;
+  background: var(--steel);
+  transition: width 1s linear;
+}
+
+.days { display: grid; gap: var(--s2); }
+.day { display: flex; align-items: center; gap: var(--s3); }
+.dayName { flex: none; width: 76px; font-size: var(--fs-sm); font-weight: 700; color: var(--text-faint); }
+.daySets { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.set {
+  height: 28px;
+  padding: 0 var(--s2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+}

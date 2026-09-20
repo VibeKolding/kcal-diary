@@ -1,0 +1,25 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.info { flex: 1; min-width: 0; }
+
+.name { composes: t-card from global; }
+
+.version {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.by { flex: none; }
+
+.note {
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin-top: var(--s4);
+}

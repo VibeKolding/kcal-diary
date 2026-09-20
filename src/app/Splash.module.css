@@ -1,0 +1,145 @@
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--s5);
+}
+
+/* Заставка уходит плавно, чтобы приложение не «моргало» на старте */
+.leaving {
+  animation: fadeOut 340ms var(--ease) both;
+  pointer-events: none;
+}
+
+.mark { position: relative; }
+
+/* Текст виден сам по себе; анимация только подводит его к этому состоянию */
+.title {
+  position: relative;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+
+}
+
+.sub {
+  position: relative;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-dim);
+
+  margin-top: calc(var(--s4) * -1 + 2px);
+}
+
+/*
+ * Заставка идёт по шагам, а не всё сразу: знак собирается сам по себе
+ * (0–900 мс), после него поднимается название, за ним строка про
+ * устройство, последней — подпись автора, и только тогда по ней проходит
+ * свет. Раньше текст выезжал, пока кольцо ещё дорисовывалось, и порядок
+ * не читался.
+ *
+ * Анимация навешивается только вместе с классом .enter — то есть лишь тогда,
+ * когда браузер точно рисует кадры. Без него текст просто виден.
+ */
+.enter .title { animation: rise 420ms var(--ease) 820ms both; }
+.enter .sub { animation: rise 420ms var(--ease) 980ms both; }
+
+/*
+ * Подпись автора. Стоит сразу под подзаголовком, а не у нижнего края:
+ * взгляд на заставке держится в центре, и внизу подпись просто не читалась.
+ * Цвет золотой — тот же, что у кольца и главной кнопки, поэтому она
+ * воспринимается как фирменный знак, а не как ещё одна строка текста.
+ */
+.by {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s2);
+}
+
+.enter .by { animation: rise 420ms var(--ease) 1180ms both; }
+
+/*
+ * Финальный акцент на подписи. Одной подсветки букв мало: рядом стоят
+ * знак и заголовок такой же яркости, и глазу не за что зацепиться.
+ * Поэтому здесь перевод фокуса — приём из монтажа: всё вокруг отступает
+ * и приглушается, а подпись подаётся вперёд и чуть разряжает буквы.
+ * Начинается ровно тогда, когда подпись встала на место (1.62 с).
+ */
+.enter .mark { animation: recede 620ms var(--ease) 1620ms both; }
+.enter .title { animation: rise 420ms var(--ease) 820ms both, dim 620ms var(--ease) 1620ms both; }
+.enter .sub { animation: rise 420ms var(--ease) 980ms both, dim 620ms var(--ease) 1620ms both; }
+.enter .by { animation: rise 420ms var(--ease) 1180ms both, focus 640ms cubic-bezier(0.2, 0.9, 0.3, 1.1) 1620ms both; }
+
+@keyframes recede { to { opacity: 0.6; transform: scale(0.94); } }
+@keyframes dim { to { opacity: 0.45; } }
+@keyframes focus {
+  to { opacity: 1; transform: translateY(-2px) scale(1.14); letter-spacing: 0.3em; }
+}
+
+/*
+ * Тёплое пятно под подписью: разгорается вместе с акцентом и остаётся.
+ * Лежит отдельным слоем под текстом, поэтому не трогает сами буквы.
+ */
+.by::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 240px;
+  height: 90px;
+  transform: translate(-50%, -50%) scale(0.6);
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, var(--gold-glow), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+}
+.enter .by::before { animation: bloom 760ms var(--ease) 1640ms both; }
+@keyframes bloom {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes fadeOut { from { opacity: 1 } to { opacity: 0 } }
+/*
+ * Шаги должны именно появляться, поэтому здесь и смещение, и проявление.
+ * Безопасность даёт не сам набор свойств, а то, что класс .enter
+ * появляется только после первого настоящего кадра: если браузер не рисует,
+ * анимации нет вовсе и весь текст виден сразу. Состояние покоя — обычная
+ * непрозрачность, к нему анимация и ведёт.
+ */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter .title, .enter .sub, .enter .by,
+  .enter .mark, .enter .by::before { animation: none; }
+  .leaving .mark, .leaving .title, .leaving .sub, .leaving .by { animation: none; }
+}
+
+.holdHint {
+  position: absolute;
+  bottom: calc(var(--s7) + env(safe-area-inset-bottom));
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+/*
+ * Уход заставки: знак и заголовки поднимаются и уходят первыми, подпись
+ * задерживается и чуть подаётся вперёд. Взгляд в последний момент
+ * остаётся на ней, а не на эмблеме. Только смещение и размер.
+ */
+.leaving .mark { animation: lift 340ms var(--ease) both; }
+.leaving .title { animation: liftText 300ms var(--ease) both; }
+.leaving .sub { animation: liftText 300ms var(--ease) 40ms both; }
+.leaving .by { animation: accent 340ms cubic-bezier(0.2, 0.8, 0.3, 1.2) 80ms both; }
+@keyframes lift { to { transform: translateY(-22px) scale(1.06); } }
+@keyframes liftText { to { transform: translateY(-14px); } }
+@keyframes accent { to { transform: translateY(-2px) scale(1.09); } }

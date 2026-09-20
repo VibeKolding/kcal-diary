@@ -1,0 +1,24 @@
+# Заголовки безопасности. Читаются Netlify и Cloudflare Pages.
+# Для Vercel то же самое продублировано в vercel.json.
+/*
+  # Что странице разрешено загружать и куда обращаться.
+  # connect-src открыт ровно в один адрес — базу штрихкодов Open Food Facts.
+  # Всё остальное — только свои файлы, поэтому подсунуть чужой скрипт нельзя.
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' https://world.openfoodfacts.org; worker-src 'self'; manifest-src 'self'
+  # Браузер не должен угадывать тип файла — иначе картинку можно подсунуть как скрипт
+  X-Content-Type-Options: nosniff
+  # Приложение нельзя встроить в чужую страницу поверх невидимого слоя
+  X-Frame-Options: DENY
+  # Адрес страницы не утекает на сторонние сайты
+  Referrer-Policy: no-referrer
+  # Камера нужна только для штрихкода и только самому приложению.
+  # Всё остальное железо запрещено наглухо.
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()
+  # Только по HTTPS, включая поддомены
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/sw.js
+  Cache-Control: no-cache

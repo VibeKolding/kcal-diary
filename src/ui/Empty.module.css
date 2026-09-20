@@ -1,0 +1,29 @@
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--s2);
+  padding: var(--s6) var(--s4);
+  text-align: center;
+}
+
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 44px; height: 44px;
+  margin-bottom: var(--s1);
+  border-radius: 50%;
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-faint);
+}
+
+.title { font-size: var(--fs-base); font-weight: 700; }
+
+.text {
+  max-width: 300px;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.action { margin-top: var(--s2); }

@@ -1,0 +1,249 @@
+/* Шрифты подключаются в main.tsx через @fontsource-variable/manrope и
+   /golos-text — файлы .woff2 попадают в бандл и работают офлайн.
+   Роли разведены токенами --font-display и --font-text (см. tokens.css). */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-text);
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  /* 500, а не 400: тонкий Manrope на стекле рассыпается, а 600 и выше
+     занимают почти весь интерфейс — иерархии не остаётся */
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
+}
+
+/* Цветное свечение под интерфейсом рисует src/app/Backdrop.tsx: пять-шесть
+   пятен, каждое своим слоем, чтобы двигаться, не перерисовывая весь фон.
+   Именно оно даёт стеклу что преломлять. */
+
+/*
+ * Призматический отсвет отдельным слоем поверх цветных пятен: у него
+ * своё размытие, потому что полосы должны остаться узкими, а пятна —
+ * растворёнными. В тёмной теме слой пустой и ничего не стоит.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: -10%;
+  background: var(--sheen);
+  filter: blur(var(--sheen-blur));
+  opacity: var(--sheen-opacity);
+  mix-blend-mode: screen;
+  z-index: -1;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+/*
+ * Зерно поверх интерфейса. Лежит НАД карточками, а не под ними: под стеклом
+ * его размыло бы вместе с фоном, и смысл — снять пластиковость блюра —
+ * пропал бы. Обычное наложение при малой прозрачности: режимы смешивания
+ * на телефоне заставляют пересобирать всю сцену на каждый кадр.
+ */
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: var(--grain);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* Все цифры выравниваются по ширине, иначе счётчики дёргаются при пересчёте */
+.num { font-variant-numeric: tabular-nums; }
+
+/*
+ * Типографические роли. Модули подключают их через composes … from global,
+ * чтобы заголовок экрана не объявлялся в каждом файле заново.
+ */
+.t-screen {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xl);
+  font-weight: 800;
+  letter-spacing: var(--ls-display);
+  line-height: var(--lh-tight);
+}
+/*
+ * Шапка экрана: заголовок по центру с короткой золотой чертой под ним.
+ *
+ * Раньше заголовок стоял слева и читался как ещё одна строка текста —
+ * вкладку было не опознать с одного взгляда. Черта даёт разделу ось и
+ * повторяет приём подписи автора на заставке, поэтому новый язык не
+ * появляется, а работает уже знакомый.
+ */
+.t-head { text-align: center; }
+.t-rule { position: relative; padding-bottom: 12px; }
+.t-rule::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--text-unit), transparent);
+}
+/* Подпись под заголовком: та же ось и мера строки, чтобы не расползалась */
+.t-lead {
+  max-width: 34ch;
+  margin-inline: auto;
+  font-size: var(--fs-ui);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.t-card {
+  font-family: var(--font-display);
+  font-size: var(--fs-base);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.t-caps {
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-unit);
+}
+/* Крупные числа: на единицу мягче 800, иначе цифры «залипают» друг в друга */
+.t-display {
+  font-family: var(--font-display);
+  font-variation-settings: 'wght' 780;
+  font-weight: 780;
+  letter-spacing: var(--ls-display);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Отклонение от нормы — капсула с числом. Живёт и в полосах БЖУ, и в подсказке
+ * графика, поэтому роль общая: два одинаковых набора правил в разных модулях
+ * разошлись бы при первой же правке.
+ *
+ * Тон никогда не единственный носитель смысла: рядом всегда знак + / −
+ * и слово для скринридера.
+ */
+.u-delta {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: var(--track);
+  color: var(--text-dim);
+}
+.u-delta-over {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: color-mix(in srgb, var(--danger) 72%, var(--text));
+}
+/* Недобор — не тревога, поэтому нейтральный тон трека */
+.u-delta-under { background: var(--track); color: var(--text-dim); }
+.u-delta-on {
+  background: color-mix(in srgb, var(--text-unit) 14%, transparent);
+  color: var(--text-unit);
+}
+/*
+ * На светлом фоне те же смеси дают 3.1:1 и 4.4:1 — ниже AA на 11 пикселях.
+ * Токены не трогаем, подмешиваем в текст больше основного цвета.
+ */
+[data-theme='light'] .u-delta-over { color: color-mix(in srgb, var(--danger) 40%, var(--text)); }
+[data-theme='light'] .u-delta-on { color: color-mix(in srgb, var(--text-unit) 84%, var(--text)); }
+
+/*
+ * Отклик на касание — один на всё приложение. Карточки и строки списков
+ * получают класс в разметке; кнопки-примитивы (Pill, Chip, таб-бар)
+ * используют те же токены у себя в стилях.
+ */
+.pressable {
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease);
+}
+.pressable:active { transform: var(--press); }
+/* Без подсветки при наведении: filter на элементе со стеклом заставляет
+   браузер пересобирать backdrop-filter — карточка дёргается и мерцает */
+
+/*
+ * Появление списков каскадом: элемент выезжает на шесть пикселей с задержкой
+ * по индексу. Состояние покоя задано обычными свойствами — если браузер
+ * не знает @starting-style, элемент просто виден сразу.
+ */
+.rise-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  transition-delay: calc(min(var(--i, 0), 8) * 28ms);
+}
+@starting-style {
+  .rise-in { opacity: 0; transform: translateY(6px); }
+}
+
+h1, h2, h3, h4, p { margin: 0; }
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, select, textarea { font: inherit; color: inherit; }
+
+a { color: inherit; text-decoration: none; }
+
+/* Фокус с клавиатуры виден, с пальца и мыши — нет. Текстовые поля
+   показывают фокус своей рамкой, поэтому здесь только кнопки и ссылки. */
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--glass-border);
+  outline-offset: 2px;
+}
+
+/* Смена экрана и темы — короткий кросс-фейд средствами браузера */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: var(--ease);
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* Только для скринридера: графики получают текстовую копию */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Безопасные зоны iPhone */
+.safe-top { padding-top: max(var(--s4), env(safe-area-inset-top)); }
+.safe-bottom { padding-bottom: max(var(--s4), env(safe-area-inset-bottom)); }

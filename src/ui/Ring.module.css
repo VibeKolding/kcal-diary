@@ -1,0 +1,36 @@
+.wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.svg { transform: rotate(-90deg); overflow: visible; }
+
+.track { stroke: var(--track); }
+
+.value {
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur) var(--ease);
+  filter: drop-shadow(0 0 10px var(--gold-glow));
+}
+
+/* Перебор нормы — цвет меняется (градиент подставляет разметка), но рядом
+   всегда стоит подпись: на один только цвет ничего критичного не завязано. */
+.over { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--danger) 45%, transparent)); }
+
+.center {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 2px;
+}
+
+.big { composes: t-display from global; font-size: var(--fs-display); }
+
+.caption {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-unit-hi);
+  letter-spacing: 0.02em;
+}

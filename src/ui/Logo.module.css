@@ -1,0 +1,50 @@
+.wrap { display: inline-grid; place-items: center; }
+
+.svg { display: block; overflow: visible; }
+
+/*
+ * Важное правило: состояние покоя задаётся обычными свойствами, а анимация
+ * лишь ведёт к нему ОТ стартового кадра. Если анимация не запустится —
+ * фоновая вкладка, слабое устройство, отключённое движение — знак всё равно
+ * виден целиком. Обратный порядок (opacity: 0 в базе) даёт пустой экран.
+ */
+.ring {
+  stroke: url(#logoGold);
+  stroke-linecap: round;
+  fill: none;
+  stroke-dasharray: 251;
+  stroke-dashoffset: 32;
+  filter: drop-shadow(0 0 12px var(--gold-glow));
+}
+
+.leaf {
+  stroke: url(#logoGold);
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: center;
+}
+
+/* Залитый лист: та же фигура, но сплошная — как у объёмного знака */
+.leafSolid { fill: url(#logoGold); }
+
+.animated .ring { animation: draw 700ms var(--ease) both; }
+.animated .leaf { animation: bloom 520ms var(--ease) 380ms both; }
+
+/* Кольцо начинает прочерчиваться не с нуля: если кадры встанут в начале,
+   на экране всё равно будет видна дуга, а не пустое место. */
+@keyframes draw {
+  from { stroke-dashoffset: 190; }
+  to   { stroke-dashoffset: 32; }
+}
+
+/* По той же причине лист меняет только размер и поворот: замерший кадр
+   покажет уменьшенный лист, а не пустоту. */
+@keyframes bloom {
+  from { transform: scale(0.72) rotate(-12deg); }
+  to   { transform: scale(1) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated .ring, .animated .leaf { animation: none; }
+}

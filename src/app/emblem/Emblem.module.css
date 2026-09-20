@@ -1,0 +1,17 @@
+/* Сцена эмблемы: пока чанк не приехал, на этом же месте стоит SVG-знак */
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.canvas { display: block; }
+
+/* Появление — только смещением и размером, без прозрачности: если кадры
+   встанут, знак всё равно виден (правило заставки) */
+.enter { animation: pop 620ms var(--ease) both; }
+@keyframes pop {
+  from { transform: translateY(10px) scale(0.92); }
+  to { transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .enter { animation: none; } }

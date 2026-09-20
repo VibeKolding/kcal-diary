@@ -1,0 +1,23 @@
+.head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.title { composes: t-card from global; }
+.hint { font-size: var(--fs-sm); color: var(--text-faint); font-weight: 600; }
+
+.note { font-size: var(--fs-md); color: var(--text-dim); line-height: var(--lh-loose); }
+.note + * { margin-top: var(--s3); }
+.warn { color: var(--danger); }
+
+.form { display: grid; gap: var(--s3); }
+
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--glass-border-soft);
+}
+.row:last-of-type { border-bottom: none; }
+.rowText { display: grid; gap: 1px; min-width: 0; }
+.rowTitle { font-size: var(--fs-ui); font-weight: 700; }
+.rowHint { font-size: var(--fs-sm); color: var(--text-faint); }

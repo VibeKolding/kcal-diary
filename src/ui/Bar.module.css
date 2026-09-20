@@ -1,0 +1,27 @@
+.row { display: grid; gap: 6px; }
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.label { color: var(--text-dim); letter-spacing: 0.02em; }
+.right { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; }
+.value { color: var(--text); white-space: nowrap; }
+.value span { color: var(--text-unit); font-weight: 500; }
+
+.track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width var(--dur) var(--ease);
+}

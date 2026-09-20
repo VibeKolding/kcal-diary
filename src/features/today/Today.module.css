@@ -1,0 +1,176 @@
+.screen {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(var(--s5), env(safe-area-inset-top)) var(--s4)
+           calc(var(--tabbar-h) + var(--s7));
+  display: grid;
+  /* Колонка обязана быть minmax(0, 1fr): при auto длинное название блюда
+     задаёт минимальную ширину трека и растягивает весь экран вбок. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s4);
+}
+
+/* --- Шапка с переключением дня --- */
+.head {
+  /* Стрелка, дата, стрелка: середина остаётся посередине экрана независимо
+     от длины даты — «Сегодня» и «Пн · 15.09» не должны смещать ось */
+  display: grid;
+  grid-template-columns: var(--h-md) minmax(0, 1fr) var(--h-md);
+  align-items: center;
+  gap: var(--s3);
+}
+
+.headCenter { composes: t-head from global; min-width: 0; }
+.day { composes: t-screen t-rule from global; }
+.daySub {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  font-weight: 600;
+  margin-top: var(--s2);
+}
+
+.iconBtn {
+  display: grid; place-items: center;
+  width: var(--h-md); height: var(--h-md);
+  border-radius: 50%;
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  transition: color var(--dur-fast) var(--ease);
+}
+.iconBtn:active { color: var(--text); }
+.iconBtn:disabled { opacity: 0.3; pointer-events: none; }
+
+/* --- Герой: кольцо выходит за верхний край карточки ---
+   Тот же приём, что с тарелкой в референсе: главный объект разрывает границу,
+   и композиция перестаёт быть плоским списком карточек. */
+.heroCard { margin-top: 92px; overflow: visible; }
+
+.hero { display: grid; justify-items: center; gap: var(--s5); }
+
+.ringWrap {
+  position: relative;
+  margin-top: -104px;
+}
+
+/* Ореол под кольцом — оно должно выглядеть источником света, а не наклейкой */
+.ringWrap::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--gold-glow), transparent 62%);
+  filter: blur(24px);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.heroSub {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); }
+
+.bars { display: grid; gap: var(--s3); width: 100%; }
+
+/* Тонкая строка под кольцом: цель и неделя, без отдельной карточки */
+.strip {
+  display: grid; justify-items: center;
+  gap: 2px;
+  margin-top: calc(var(--s3) * -1);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.noteBlock { display: grid; }
+.noteSave {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: none;
+  border-radius: 50%;
+  background: var(--contrast-fill);
+  color: var(--contrast-text);
+}
+
+.overBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+/* --- Вода --- */
+.water { display: flex; align-items: center; gap: var(--s3); }
+.waterInfo { flex: 1; min-width: 0; }
+.waterTitle { font-family: var(--font-display); font-size: var(--fs-ui); font-weight: 700; }
+.waterValue { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 600; margin-top: 1px; }
+.waterBtns { display: flex; gap: var(--s2); }
+
+/* --- Приёмы пищи --- */
+.mealHead {
+  display: flex;
+  /* По центру, а не по базовой линии: слева теперь группа со значком, и на
+     общей базовой линии «0 ккал» уезжал вниз относительно названия */
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+.mealName { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.mealTitle { font-family: var(--font-display); font-size: var(--fs-base); font-weight: 800; letter-spacing: -0.01em; }
+.mealKcal { font-size: var(--fs-md); font-weight: 700; color: var(--gold-1); }
+[data-theme='light'] .mealKcal { color: var(--gold-2); }
+
+.entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  min-width: 0;
+  padding: var(--s2) 0;
+  text-align: left;
+}
+
+.entryBody { flex: 1; min-width: 0; }
+.entryName {
+  font-size: var(--fs-ui); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.entryMeta { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 600; margin-top: 1px; }
+.entryKcal { font-size: var(--fs-ui); font-weight: 700; flex: none; }
+
+.mealEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.emptyText { font-size: var(--fs-md); color: var(--text-faint); }
+.mealActions { display: flex; gap: var(--s1); flex: none; }
+
+.addLine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.quickRow { display: flex; gap: var(--s2); flex-wrap: wrap; }

@@ -1,0 +1,206 @@
+.screen {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(var(--s5), env(safe-area-inset-top)) var(--s4)
+           calc(var(--tabbar-h) + var(--s7));
+  display: grid;
+  /* Колонка обязана быть minmax(0, 1fr): при auto длинное название блюда
+     задаёт минимальную ширину трека и растягивает весь экран вбок. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s4);
+}
+
+.title { composes: t-screen t-rule t-head from global; }
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.cardTitle { composes: t-card from global; }
+.cardHint { font-size: var(--fs-sm); color: var(--text-faint); font-weight: 600; }
+
+/* Оговорка под цифрами: почему считалось не по всем дням */
+.note {
+  margin: var(--s3) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.chart { width: 100%; height: 180px; margin: 0 calc(var(--s2) * -1); }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+.stat { text-align: center; }
+.statValue { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; }
+.statLabel {
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-unit); margin-top: 2px;
+}
+.gold { color: var(--gold-1); }
+[data-theme='light'] .gold { color: var(--gold-2); }
+
+/* --- Итог периода --- */
+.balMain {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+/* «из нормы» — служебная часть числа, поэтому тише и тем же золотом, что единицы */
+.balOf { font-size: var(--fs-md); font-weight: 600; color: var(--text-unit); letter-spacing: 0; }
+.balRows {
+  display: grid;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--glass-border-soft);
+}
+.balRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--fs-ui);
+  font-weight: 700;
+}
+.balDot { flex: none; width: 8px; height: 8px; border-radius: 50%; transform: translateY(-1px); }
+.balLabel { color: var(--text-dim); }
+.balValue { margin-left: auto; color: var(--text); white-space: nowrap; }
+
+/* --- Подсказка столбца ---
+   Дефолтная подсказка recharts даёт одну строку; здесь нужна таблица,
+   поэтому content свой, а стили переехали из contentStyle сюда. */
+.tip {
+  min-width: 176px;
+  /* Без потолка длинная приписка растягивает подсказку на всю карточку */
+  max-width: 208px;
+  padding: var(--s3);
+  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-weight: 600;
+}
+.tipHead {
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-unit);
+}
+.tipWeekday { color: var(--text-faint); font-weight: 700; }
+.tipEmpty { margin-top: var(--s2); color: var(--text-faint); font-weight: 600; }
+.tipMain {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-top: var(--s2);
+  font-size: var(--fs-lg);
+  font-weight: 800;
+}
+.tipRows {
+  display: grid;
+  gap: 5px;
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--glass-border-soft);
+}
+.tipRow { display: flex; align-items: baseline; gap: var(--s2); }
+.tipDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: translateY(-1px);
+}
+.tipLabel { color: var(--text-dim); }
+.tipValue { margin-left: auto; color: var(--text); }
+.tipNote {
+  margin-top: var(--s3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* --- Тепловая карта --- */
+.heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); }
+.heatCell {
+  aspect-ratio: 1;
+  border-radius: var(--radius-xs);
+  background: var(--track);
+  position: relative;
+}
+.heatOn { background: color-mix(in srgb, var(--gold-2) 78%, transparent); }
+.heatUnder { background: color-mix(in srgb, var(--gold-2) 34%, transparent); }
+.heatOver { background: color-mix(in srgb, var(--danger) 55%, transparent); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.legendItem { display: flex; align-items: center; gap: var(--s1); }
+.swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+/* --- Вода --- */
+.forecast {
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+  margin: calc(var(--s2) * -1) 0 var(--s3);
+  line-height: var(--lh-loose);
+}
+.waterBars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+  height: 56px;
+  align-items: end;
+}
+.waterCol { display: flex; align-items: end; height: 100%; }
+.waterFill {
+  width: 100%;
+  min-height: 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--water) 45%, transparent);
+  transition: height var(--dur) var(--ease);
+}
+.waterOk { background: var(--water); }
+
+/* --- Привычки --- */
+.habitList { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+.habit {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  font-size: var(--fs-ui);
+}
+.habitName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.habitValue { font-weight: 700; color: var(--text-dim); flex: none; font-size: var(--fs-md); }
+
+.insight {
+  display: grid;
+  gap: 3px;
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--glass-border-soft);
+}
+.insightLabel {
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-unit);
+}
+.insightValue { font-size: var(--fs-base); font-weight: 700; }
+
+.empty { text-align: center; color: var(--text-dim); font-size: var(--fs-ui); padding: var(--s5) 0; line-height: 1.5; }

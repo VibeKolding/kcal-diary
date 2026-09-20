@@ -1,0 +1,127 @@
+/*
+ * Круглый чип с иконкой категории — заменяет фуд-фотографию из референсов.
+ *
+ * Цвет холодный, а не золотой: золото в этом интерфейсе означает норму и
+ * прогресс, и если им же красить каждую строку еды, акцент перестаёт работать.
+ * Кристальный тон отделяет содержимое дневника от его цели.
+ */
+.chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--crystal-edge);
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--crystal-1) 28%, transparent),
+      color-mix(in srgb, var(--crystal-2) 12%, transparent) 58%,
+      transparent 78%),
+    var(--glass);
+  color: var(--crystal-ink);
+  /* Тонкий штрих на маленькой иконке почти не показывает цвет —
+     свечение возвращает ему холодный тон */
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--crystal-1) 30%, transparent));
+}
+
+/* На светлом фоне свечение только замыливает тёмный штрих */
+[data-theme='light'] .chip {
+  filter: none;
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--crystal-2) 20%, transparent),
+      transparent 70%),
+    var(--glass-strong);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+}
+
+/* Блик по верхней грани — тот же приём, что на карточках */
+.chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(150deg, var(--edge-hi), var(--edge-mid) 30%, transparent 48%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+
+
+/* --- Уровень в чипе: та же метафора сосуда для остальных категорий --- */
+.levelClip {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.level {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--crystal-2) 42%, transparent),
+    color-mix(in srgb, var(--crystal-1) 16%, transparent));
+  /* Светлая черта по кромке: без неё заливка читается пятном, а не уровнем */
+  border-top: 1px solid color-mix(in srgb, var(--crystal-1) 55%, transparent);
+  transition: height var(--dur) var(--ease);
+}
+
+.svg { display: block; }
+
+/* --- Вода в стакане --- */
+
+/* Уровень меняется сдвигом, с лёгким перелётом: вода не тормозит мгновенно */
+.liquid {
+  transition: transform 560ms cubic-bezier(0.2, 0.9, 0.25, 1.12);
+  will-change: transform;
+}
+
+/* Колыхание после долива: поверхность качнулась и успокоилась */
+.slosh { animation: slosh 900ms cubic-bezier(0.25, 0.8, 0.3, 1) both; }
+@keyframes slosh {
+  0%   { transform: translateX(0); }
+  22%  { transform: translateX(-1.4px); }
+  50%  { transform: translateX(1px); }
+  74%  { transform: translateX(-0.5px); }
+  100% { transform: translateX(0); }
+}
+
+/* Блик медленно идёт по поверхности — тот же приём, что у кольца заставки */
+.glint { animation: glint 5.5s ease-in-out infinite; }
+@keyframes glint {
+  0%, 100% { transform: translateX(2px); }
+  50%      { transform: translateX(22px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid { transition: none; }
+  .slosh, .glint { animation: none; }
+  .level { transition: none; }
+}
+
+/* --- Кольцо прогресса вокруг чипа --- */
+.ring {
+  position: absolute;
+  inset: -5px;
+  transform: rotate(-90deg);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ringTrack { stroke: var(--track); }
+
+.ringValue {
+  stroke: var(--crystal-2);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur) var(--ease);
+}
+
+[data-theme='dark'] .ringValue { stroke: var(--crystal-1); }

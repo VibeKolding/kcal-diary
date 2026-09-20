@@ -1,0 +1,18 @@
+.boot {
+  min-height: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--s4);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.fatal {
+  max-width: 420px;
+  padding: var(--s5);
+  text-align: center;
+  line-height: 1.6;
+  color: var(--danger);
+}

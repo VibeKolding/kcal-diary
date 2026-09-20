@@ -1,0 +1,49 @@
+/*
+ * Обложка блюда. Рисунок, а не фотография: он весит около нуля, работает
+ * офлайн, подстраивается под обе темы и не может разойтись с составом,
+ * потому что собирается из него же.
+ */
+.wrap {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+}
+
+.svg { display: block; width: 100%; height: auto; }
+
+.photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  aspect-ratio: 16 / 10;
+}
+
+/* Блик по верхней грани — обложка живёт в том же стеклянном языке */
+.wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(150deg, var(--edge-hi), var(--edge-mid) 30%, transparent 48%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.credit {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px var(--s3) 6px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+  text-align: right;
+}

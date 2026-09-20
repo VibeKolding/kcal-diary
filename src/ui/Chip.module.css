@@ -1,0 +1,39 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-sm);
+  padding: 0 var(--s3);
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform var(--dur-press) var(--ease), background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.chip:active { transform: var(--press-strong); }
+
+.active {
+  border-color: var(--glass-border);
+  background: var(--glass-strong);
+  color: var(--text);
+}
+
+.row {
+  display: flex;
+  gap: var(--s2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Ряд уходит под край экрана — приём из обоих референсов */
+  margin: 0 calc(var(--s4) * -1);
+  padding: 0 var(--s4);
+}
+
+/* Ряд под центрованным заголовком. safe center, а не center: если чипы
+   не помещаются, ряд должен прокручиваться с начала, а не обрезать его.
+   Браузер без поддержки просто отбросит правило и оставит выравнивание слева. */
+.rowCenter { justify-content: safe center; }

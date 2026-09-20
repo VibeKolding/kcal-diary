@@ -1,0 +1,140 @@
+.screen {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(var(--s5), env(safe-area-inset-top)) var(--s4)
+           calc(var(--tabbar-h) + var(--s7));
+  display: grid;
+  /* Колонка обязана быть minmax(0, 1fr): при auto длинное название блюда
+     задаёт минимальную ширину трека и растягивает весь экран вбок. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s4);
+}
+
+.title { composes: t-screen t-rule t-head from global; }
+
+.cardHead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.cardTitle { composes: t-card from global; }
+.cardHint { font-size: var(--fs-sm); color: var(--text-faint); font-weight: 600; }
+
+.rows { display: grid; }
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--glass-border-soft);
+  font-size: var(--fs-ui);
+}
+.row:last-child { border-bottom: none; }
+.rowLabel { color: var(--text-dim); font-weight: 600; }
+.rowValue { font-weight: 700; }
+
+.quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
+
+.field { display: grid; gap: var(--s2); min-width: 0; }
+.label { composes: t-caps from global; }
+
+.themeRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+
+.themeCard {
+  composes: pressable from global;
+  padding: var(--s3);
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  text-align: left;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.themeOn { border-color: var(--glass-border); background: var(--glass-strong); }
+
+.swatch {
+  height: 54px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--s2);
+  position: relative;
+  overflow: hidden;
+}
+.swatchDark { background: linear-gradient(135deg, #131315, #0B0B0C); }
+/* Тот же порядок пятен, что у самой темы: тёплое, коралл, сирень, бирюза */
+.swatchLight { background: linear-gradient(150deg, #FFD9A8 0%, #F3B9CB 36%, #D9CCF6 64%, #BFE9F7 100%); }
+
+.swatchChip {
+  position: absolute;
+  left: 10px; right: 10px; bottom: 9px; height: 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(6px);
+}
+.swatchDark .swatchChip { background: rgba(255, 255, 255, 0.09); }
+.swatchLight .swatchChip { background: rgba(255, 255, 255, 0.5); border-color: rgba(255, 255, 255, 0.7); }
+
+.swatchDot {
+  position: absolute;
+  top: 9px; right: 10px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: linear-gradient(135deg, #F2D99B, #C9952B);
+}
+.swatchLight .swatchDot { background: #14131A; }
+
+.themeName { font-size: var(--fs-md); font-weight: 700; }
+
+.actions { display: grid; gap: var(--s3); }
+.note { font-size: var(--fs-md); color: var(--text-dim); line-height: 1.55; }
+.warn { color: var(--danger); }
+.dangerBtn { background: var(--danger); color: #fff; }
+.ok { color: var(--carbs); }
+
+.hidden { display: none; }
+
+/* --- Редактор анкеты --- */
+.editBtn {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.editForm { display: grid; gap: var(--s4); }
+
+.segment {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+}
+
+.segItem {
+  height: var(--h-md);
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: var(--fs-ui);
+  color: var(--text-dim);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.segItemOn { background: var(--glass-strong); color: var(--text); }
+
+.optionList { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+.option {
+  height: var(--h-md);
+  padding: 0 var(--s3);
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.optionOn {
+  border-color: var(--glass-border);
+  background: var(--glass-strong);
+  color: var(--text);
+}

@@ -1,0 +1,72 @@
+/*
+ * Оболочка значка — та же стеклянная линза, что у иконок записей
+ * (FoodIcon.module.css): слоистый градиент, цветная кромка, блик по верхней
+ * грани. Благодаря ей сцена внутри сидит в объёме, а не лежит на плоскости.
+ */
+.chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--crystal-edge);
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--crystal-1) 24%, transparent),
+      color-mix(in srgb, var(--crystal-2) 10%, transparent) 58%,
+      transparent 78%),
+    var(--glass);
+  overflow: hidden;
+}
+
+[data-theme='light'] .chip {
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--crystal-2) 16%, transparent),
+      transparent 70%),
+    var(--glass-strong);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+}
+
+.chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(150deg, var(--edge-hi), var(--edge-mid) 30%, transparent 48%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.svg { display: block; overflow: visible; }
+.photo { width: 82%; height: 82%; object-fit: contain; }
+
+/*
+ * Движение — лёгкая петля, без появлений и исчезновений: значок всегда на
+ * месте и всегда видим, меняется только положение на полтора пикселя и
+ * наклон на пару градусов. Прозрачность не трогаем вовсе — мигание на
+ * четырёх карточках сразу читается как дефект.
+ *
+ * Разные длительности у приёмов — чтобы четыре значка не качались строем:
+ * синхронное движение выглядит механическим.
+ */
+.art {
+  transform-origin: 50% 58%;
+  animation: mealFloat 6200ms ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -1450ms);
+}
+
+@keyframes mealFloat {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+  35%      { transform: translateY(-1.4px) rotate(-2.4deg) scale(1.035); }
+  70%      { transform: translateY(0.6px) rotate(1.6deg) scale(0.99); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .art { animation: none; }
+}

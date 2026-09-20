@@ -1,0 +1,89 @@
+/*
+ * Стеклянная карточка — базовый строительный блок обеих тем.
+ * Волосяная рамка обязательна: без неё край растворяется и композиция разваливается.
+ */
+.glass {
+  position: relative;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border-soft);
+  /* Два слоя: тонкая светлая плёнка стекла и под ней подложка.
+     Подложка нужна именно из-за яркого фона — без неё текст плывёт
+     там, где за карточкой оказалось светлое пятно. */
+  background:
+    linear-gradient(var(--glass), var(--glass)),
+    linear-gradient(var(--glass-scrim), var(--glass-scrim));
+  /* saturate вытягивает цвет из фона сквозь стекло — без него сильное
+     размытие превращает всё в серую кашу. brightness чуть поднимает
+     тёмные участки, чтобы грань не тонула. */
+  backdrop-filter: blur(var(--blur)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  box-shadow: var(--shadow-soft);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  /* Карточка-кнопка наследует эти же поля от button */
+  text-align: inherit;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+
+/* Акцентная карточка: золотая рамка и тёплый отлив,
+   как у золотого блока-героя во втором референсе */
+.accent {
+  border-color: var(--glass-border);
+  background:
+    linear-gradient(158deg,
+      color-mix(in srgb, var(--gold-1) 9%, transparent),
+      transparent 46%),
+    linear-gradient(var(--glass-strong), var(--glass-strong)),
+    linear-gradient(var(--glass-scrim), var(--glass-scrim));
+  box-shadow: var(--shadow);
+}
+
+.pad { padding: var(--s4); }
+.padLg { padding: var(--s5); }
+.flat { box-shadow: none; }
+
+/*
+ * Грань стекла. Свет ловится дважды: яркая линия сверху слева, где на стекло
+ * падает свет, и слабая снизу справа — отражение. Одна линия по всему периметру
+ * выглядит как рамка, две дают толщину.
+ */
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* Полтора пикселя: толстое стекло — толстая кромка */
+  padding: 1.5px;
+  background:
+    linear-gradient(150deg,
+      var(--edge-hi) 0%,
+      var(--edge-mid) 26%,
+      transparent 48%),
+    linear-gradient(150deg,
+      var(--edge-tint) 0%,
+      transparent 60%),
+    linear-gradient(330deg,
+      var(--edge-lo) 0%,
+      transparent 34%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Мягкий внутренний свет от верхнего края — стекло перестаёт быть плоским */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    var(--glass-light) 0%,
+    transparent 58%
+  );
+  pointer-events: none;
+}
+

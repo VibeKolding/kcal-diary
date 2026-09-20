@@ -1,0 +1,37 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: var(--h-lg);
+  padding: 0 var(--s5);
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: var(--fs-base);
+  letter-spacing: 0.01em;
+  transition: transform var(--dur-press) var(--ease), opacity var(--dur-fast) var(--ease), filter var(--dur-press) var(--ease);
+}
+
+.pill:active { transform: var(--press-strong); }
+.pill:disabled { opacity: 0.4; pointer-events: none; }
+
+/* Единственный высококонтрастный элемент на экране.
+   В тёмной теме это золото, в светлой — чёрный, как в референсе. */
+.primary {
+  background: var(--contrast-fill);
+  color: var(--contrast-text);
+  box-shadow: var(--shadow-soft);
+}
+
+.ghost {
+  background: var(--glass);
+  color: var(--text);
+  border: 1px solid var(--glass-border-soft);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+}
+
+.quiet { color: var(--text-dim); }
+
+.sm { height: var(--h-md); padding: 0 var(--s4); font-size: var(--fs-ui); }
+.block { display: flex; width: 100%; }

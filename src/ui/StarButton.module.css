@@ -1,0 +1,12 @@
+.star {
+  display: grid; place-items: center;
+  width: var(--h-sm); height: var(--h-sm);
+  border-radius: 50%;
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  flex: none;
+}
+.on { color: var(--gold-1); border-color: var(--glass-border); }
+.on svg { fill: currentColor; }
+[data-theme='light'] .on { color: var(--gold-2); }

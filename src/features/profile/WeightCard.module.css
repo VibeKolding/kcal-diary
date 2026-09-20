@@ -1,0 +1,62 @@
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.title { composes: t-card from global; }
+.when { font-size: var(--fs-sm); color: var(--text-faint); font-weight: 600; }
+
+.now {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s4);
+}
+
+.big { composes: t-display from global; font-size: var(--fs-4xl); }
+.unit { font-size: var(--fs-lg); font-weight: 700; color: var(--text-dim); }
+
+.deltas { display: grid; gap: 2px; text-align: right; font-size: var(--fs-md); font-weight: 700; }
+.down { color: var(--carbs); }
+.up { color: var(--fat); }
+.flat { color: var(--text-dim); }
+
+.form { display: grid; gap: var(--s3); }
+
+.note {
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin-top: var(--s3);
+}
+
+.goalLine {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--gold-1);
+  margin: calc(var(--s3) * -1) 0 var(--s4);
+}
+[data-theme='light'] .goalLine { color: var(--gold-2); }
+.trend { color: var(--text-dim); font-weight: 600; }
+
+.girths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); }
+
+.link {
+  justify-self: start;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+.targetRow {
+  display: flex;
+  align-items: end;
+  gap: var(--s2);
+  margin-top: var(--s4);
+}
+.targetRow > :first-child { flex: 1; min-width: 0; }
+.targetBtn { flex: none; height: var(--h-xl); }

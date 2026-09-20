@@ -1,0 +1,45 @@
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.title { composes: t-card from global; }
+.hint { font-size: var(--fs-sm); color: var(--text-faint); font-weight: 600; }
+
+.body { display: grid; gap: var(--s3); }
+
+.note { font-size: var(--fs-md); color: var(--text-dim); line-height: 1.55; }
+.ok { color: var(--carbs); }
+
+.steps { display: grid; gap: var(--s3); }
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
+}
+
+.num {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--crystal-edge);
+  background: color-mix(in srgb, var(--crystal-1) 14%, transparent);
+  color: var(--crystal-ink);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Иконка «Поделиться» внутри строки — её и надо искать в Safari */
+.inline {
+  display: inline-flex;
+  vertical-align: -3px;
+  margin: 0 2px;
+  color: var(--crystal-ink);
+}

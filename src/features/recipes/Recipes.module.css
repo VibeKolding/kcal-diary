@@ -1,0 +1,55 @@
+.wrap { display: grid; gap: var(--s4); }
+
+.list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+
+.row {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; padding: var(--s2) 0; text-align: left;
+}
+.rowBody { flex: 1; min-width: 0; }
+.rowName { font-size: var(--fs-base); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowMeta { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 600; margin-top: 1px; }
+.rowKcal { font-size: var(--fs-ui); font-weight: 700; color: var(--gold-1); flex: none; }
+[data-theme='light'] .rowKcal { color: var(--gold-2); }
+
+.del { color: var(--text-faint); font-size: var(--fs-lg); line-height: 1; padding: 0 var(--s2); flex: none; }
+
+.empty { text-align: center; padding: var(--s5) var(--s4); display: grid; gap: var(--s3); justify-items: center; }
+.emptyText { font-size: var(--fs-ui); color: var(--text-dim); line-height: 1.5; }
+
+/* --- Конструктор --- */
+.form { display: grid; gap: var(--s3); }
+.field { display: grid; gap: var(--s2); min-width: 0; }
+.label { composes: t-caps from global; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
+
+.ingredients { display: grid; gap: var(--s2); }
+.ing {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) 0;
+}
+.ingBody { flex: 1; min-width: 0; }
+.ingName { font-size: var(--fs-ui); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ingGrams {
+  width: 74px; height: var(--h-sm); flex: none;
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+  color: var(--text);
+  font-size: var(--fs-ui); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center; outline: none;
+}
+
+.hint { font-size: var(--fs-sm); color: var(--text-faint); line-height: 1.5; }
+.warn { color: var(--danger); }
+
+.summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s2); }
+.cell { text-align: center; padding: var(--s3) var(--s2); }
+.cellValue { font-size: var(--fs-lg); font-weight: 800; letter-spacing: -0.02em; }
+.cellLabel {
+  font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-unit); margin-top: 2px;
+}
+.kcalCell .cellValue { color: var(--gold-1); }
+[data-theme='light'] .kcalCell .cellValue { color: var(--gold-2); }

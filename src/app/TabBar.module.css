@@ -1,0 +1,109 @@
+/* Плавающий таб-бар в форме pill — прямая цитата из первого референса */
+.wrap {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--s3) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: calc(100vw - var(--s4));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-soft);
+  /* Заливка не сплошная, а как у стеклянной трубки: свет лёг на верхний край,
+     снизу слабое отражение, середина почти пустая — сквозь неё видно фон.
+     Слои живут в background, а не в ::before: псевдоэлемент с position
+     рисуется поверх вкладок и выбеливает иконки. */
+  background:
+    linear-gradient(180deg, var(--glass-light) 0%, transparent 52%),
+    linear-gradient(0deg, color-mix(in srgb, var(--glass-light) 45%, transparent) 0%, transparent 30%),
+    linear-gradient(var(--glass), var(--glass));
+  /* Та же насыщенность, что у карточек: на 1.7 сильное размытие сводило
+     фон под баром в серую кашу, и стекло читалось молоком */
+  backdrop-filter: blur(var(--blur-strong)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  box-shadow: var(--shadow);
+}
+
+/*
+ * Тёмная тема получает подложку под стеклом — ту же, что у карточек.
+ * Без неё яркое пятно фона проходит сквозь бар насквозь, и подпись над ним
+ * падала до 3.3:1 при норме 4.5. На светлой теме подложка не нужна: там
+ * контраст держит тёмный текст, и бар остаётся по-настоящему прозрачным.
+ */
+[data-theme='dark'] .wrap {
+  background:
+    linear-gradient(180deg, var(--glass-light) 0%, transparent 52%),
+    linear-gradient(0deg, color-mix(in srgb, var(--glass-light) 45%, transparent) 0%, transparent 30%),
+    linear-gradient(var(--glass-strong), var(--glass-strong)),
+    /* Подложка в два слоя: одного не хватало, подпись над самым ярким пятном
+       фона держалась на 4.3 вместо 4.5 */
+    linear-gradient(var(--glass-scrim), var(--glass-scrim)),
+    linear-gradient(var(--glass-scrim), var(--glass-scrim));
+}
+
+/* Грань — та же, что у карточек: яркая сверху слева, слабое отражение снизу
+   справа. Одна линия по периметру читается рамкой, две дают толщину. */
+.wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background:
+    linear-gradient(150deg, var(--edge-hi) 0%, var(--edge-mid) 24%, transparent 46%),
+    linear-gradient(150deg, var(--edge-tint) 0%, transparent 58%),
+    linear-gradient(330deg, var(--edge-lo) 0%, transparent 32%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Четыре вкладки плюс кнопка добавления — свободнее, чем было с пятью */
+.tab {
+  display: grid;
+  place-items: center;
+  flex: 1 1 60px;
+  width: 60px; min-width: 44px; height: 52px;
+  border-radius: var(--radius-pill);
+  color: var(--text-faint);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    transform var(--dur-press) var(--ease);
+}
+.tab:active { transform: var(--press-strong); }
+
+/* Активная вкладка — стеклянный чип внутри стеклянной трубки:
+   свет сверху и волосяная кромка, иначе на прозрачном баре её не видно */
+.tab[aria-current='page'] {
+  color: var(--text);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--glass-light) 65%, transparent) 0%, transparent 64%),
+    linear-gradient(var(--glass), var(--glass));
+  box-shadow: inset 0 0 0 1px var(--glass-border-soft);
+}
+
+.label {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* Кнопка добавления — единственный контрастный элемент в баре */
+.add {
+  display: grid;
+  place-items: center;
+  width: 54px; height: 52px;
+  margin: 0 2px;
+  border-radius: var(--radius-pill);
+  background: var(--contrast-fill);
+  color: var(--contrast-text);
+  transition: transform var(--dur-press) var(--ease);
+}
+
+.add:active { transform: var(--press-strong); }
