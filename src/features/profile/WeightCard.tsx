@@ -5,7 +5,7 @@ import { Pill } from '@/ui/Pill'
 import { NumberField, parseNumber } from '@/ui/NumberField'
 import type { Profile, WeightRecord } from '@/domain/types'
 import { humanDay, dayKey } from '@/domain/dates'
-import { humanWeeks, weeklyTrend, weeksToTarget } from '@/domain/weight'
+import { goalForecast, humanWeeks } from '@/domain/weight'
 import { putWeight, weightHistory } from '@/db/tracking'
 import { db } from '@/db/db'
 import { resetToAutoTargets, updateProfile } from '@/db/profile'
@@ -71,11 +71,12 @@ export function WeightCard({
   const targetError = targetParsed !== null && (targetParsed < 30 || targetParsed > 300)
     ? 'От 30 до 300 кг' : null
 
-  // Прогноз: по реальному тренду, если он есть, иначе по темпу из анкеты
-  const trend = weeklyTrend(history.slice(-10))
-  const rate = trend ?? (profile.goal === 'lose' ? -profile.ratePerWeek : profile.goal === 'gain' ? profile.ratePerWeek : 0)
-  const weeks = latest && profile.targetWeightKg
-    ? weeksToTarget(latest.kg, profile.targetWeightKg, rate) : null
+  // Прогноз — общий с «Сегодня» и отчётами (goalForecast): по реальному
+  // тренду последних взвешиваний, если он есть, иначе по темпу из анкеты
+  const forecast = latest && profile.targetWeightKg
+    ? goalForecast(history, profile.targetWeightKg, profile) : null
+  const weeks = forecast?.weeks ?? null
+  const trend = forecast?.basis === 'trend' ? forecast.rate : null
 
   async function save() {
     if (!valid) return

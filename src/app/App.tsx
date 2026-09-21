@@ -24,10 +24,12 @@ import { UpdateBar } from './UpdateBar'
 import { useAppUpdate } from './useAppUpdate'
 import { ErrorBoundary } from './ErrorBoundary'
 import { Crash } from './Crash'
+import { describeError } from './errors'
 import { ensurePersistentStorage } from '@/db/persist'
 import { useReminders } from '@/features/reminders/useReminders'
 import { addWater } from '@/db/tracking'
 import { useToast } from '@/ui/Toast'
+import { viewedDay } from '@/features/today/useToday'
 import s from './App.module.css'
 
 export function App() {
@@ -44,7 +46,9 @@ export function App() {
   // а не ловить её за секунду (для снимков и проверки на телефоне).
   const [hold, setHold] = useState(() => new URLSearchParams(location.search).has('splash'))
 
-  const [adding, setAdding] = useState<{ meal: Meal; date: string } | null>(null)
+  // Приём не задан у «+» в таб-баре и у ярлыка: тогда панель выберет его
+  // по времени суток (mealForTime), а не молча отправит всё в перекус
+  const [adding, setAdding] = useState<{ meal?: Meal; date: string } | null>(null)
 
   const update = useAppUpdate(splash === 'showing')
 
@@ -75,7 +79,7 @@ export function App() {
     if (handledIntent.current === location.key) return
     handledIntent.current = location.key
     navigate('/', { replace: true })
-    if (add) setAdding({ meal: 'snack', date: dayKey() })
+    if (add) setAdding({ date: dayKey() })
     if (water) {
       const glass = profile.glassMl ?? 250
       const date = dayKey()
@@ -132,9 +136,25 @@ export function App() {
     return () => clearTimeout(t)
   }, [splash])
 
-  const openAdd = useCallback((meal: Meal, date: string) => {
+  const openAdd = useCallback((meal: Meal | undefined, date: string) => {
     setAdding({ meal, date })
   }, [])
+
+  /*
+   * Страховка для записей, которые не ловят свою ошибку сами. Экраны
+   * «Сегодня» и добавления еды показывают тост на каждый сбой, но если
+   * место на телефоне кончилось посреди записи где-то ещё, человек должен
+   * узнать об этом словами, а не по кнопке, которая «не работает».
+   */
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      if (describeError(e.reason).kind === 'quota') {
+        toast({ text: 'Не удалось сохранить: на устройстве не хватает места.' })
+      }
+    }
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => window.removeEventListener('unhandledrejection', onRejection)
+  }, [toast])
 
   if (fatal) return <Crash error={fatal.error} />
 
@@ -175,11 +195,13 @@ export function App() {
         </Suspense>
       </ErrorBoundary>
 
-      <TabBar onAdd={() => openAdd('snack', dayKey())} />
+      {/* «+» пишет в день, открытый на «Сегодня»: листали вчера — во вчера.
+          Если экран закрыт, viewedDay() отдаёт сегодняшний день */}
+      <TabBar onAdd={() => openAdd(undefined, viewedDay())} />
 
       <AddFood
         open={adding !== null}
-        meal={adding?.meal ?? 'snack'}
+        meal={adding?.meal}
         date={adding?.date ?? dayKey()}
         profile={profile}
         onClose={() => setAdding(null)}

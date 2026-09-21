@@ -5,9 +5,9 @@
 // элементом, не шире ли что-нибудь экрана и не ругается ли приложение в
 // консоль. Заодно ловит неудачные запросы и ответы с кодом ошибки.
 //
-// Нужен запущенный `npm run preview` (порт 4173) и Chromium из кэша
-// Playwright. Профиль и дневник сеются прямо в IndexedDB, онбординг не
-// проходится.
+// Нужен запущенный `npm run preview` (порт 4173), Node 22+ (встроенный
+// WebSocket) и Chromium из кэша Playwright или по пути CHROME_BIN.
+// Профиль и дневник сеются прямо в IndexedDB, онбординг не проходится.
 //
 // Настройки через окружение: THEME=light|dark, WIDTHS=320,375,414.
 //
@@ -21,7 +21,7 @@
 //   3. Ряды чипов `.row { overflow-x: auto }` уезжают за край намеренно:
 //      их листают пальцем.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -30,12 +30,31 @@ const BASE = process.env.PREVIEW_URL ?? 'http://localhost:4173'
 const THEME = process.env.THEME ?? 'dark'
 const WIDTHS = (process.env.WIDTHS ?? '320,375').split(',').map(Number)
 
-const cache = join(homedir(), 'Library/Caches/ms-playwright')
-const bin = [
-  'chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-  'chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-].map((p) => join(cache, p)).find(existsSync)
-if (!bin) { console.error('Chromium из кэша Playwright не найден'); process.exit(2) }
+// Браузер: CHROME_BIN, если задан, иначе самая свежая сборка Chromium из
+// кэша Playwright (`npx playwright install chromium`) — на Mac, Linux
+// или по пути из PLAYWRIGHT_BROWSERS_PATH
+const caches = [
+  process.env.PLAYWRIGHT_BROWSERS_PATH,
+  join(homedir(), 'Library/Caches/ms-playwright'),
+  join(homedir(), '.cache/ms-playwright'),
+].filter((d) => d && existsSync(d))
+const inBuild = [
+  'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+  'chrome-linux64/chrome',
+  'chrome-linux/chrome',
+]
+const builds = caches.flatMap((c) => readdirSync(c)
+  .filter((d) => /^chromium-\d+$/.test(d))
+  .map((d) => ({ dir: join(c, d), rev: Number(d.slice('chromium-'.length)) })))
+  .sort((a, b) => b.rev - a.rev)
+const bin = process.env.CHROME_BIN
+  ?? builds.flatMap((b) => inBuild.map((p) => join(b.dir, p))).find(existsSync)
+if (!bin || !existsSync(bin)) {
+  console.error('Chromium не найден: поставьте его `npx playwright install chromium` или укажите путь в CHROME_BIN')
+  process.exit(2)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const prof = mkdtempSync(join(tmpdir(), 'kcal-screens-'))

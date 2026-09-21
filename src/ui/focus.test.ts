@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tabStep } from './focus'
+import { ringStep, tabStep } from './focus'
 
 describe('Tab внутри панели', () => {
   const list = ['first', 'middle', 'last']
@@ -25,5 +25,25 @@ describe('Tab внутри панели', () => {
 
   it('пустая панель — шагать некуда', () => {
     expect(tabStep([], null, false, false)).toBeNull()
+  })
+})
+
+describe('Tab по кругу вместе с тостом', () => {
+  // «Отменить» тоста лежит вне панели и встаёт в круг последним
+  const list = ['first', 'last', 'toast']
+
+  it('с последней кнопки панели Tab ведёт на «Отменить», а оттуда — на первую', () => {
+    expect(ringStep(list, 'last', false)).toBe('toast')
+    expect(ringStep(list, 'toast', false)).toBe('first')
+  })
+
+  it('Shift+Tab с «Отменить» возвращает в панель, с первой — на «Отменить»', () => {
+    expect(ringStep(list, 'toast', true)).toBe('last')
+    expect(ringStep(list, 'first', true)).toBe('toast')
+  })
+
+  it('фокуса в круге нет — решает обычный шаг', () => {
+    expect(ringStep(list, null, false)).toBeNull()
+    expect(ringStep(list, 'elsewhere', true)).toBeNull()
   })
 })

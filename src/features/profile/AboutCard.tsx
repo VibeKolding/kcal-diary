@@ -43,6 +43,12 @@ export function AboutCard() {
         </p>
         <p>Расчёты справочные и не заменяют консультацию врача.</p>
         <p>© {__APP_AUTHOR__}, все права защищены.</p>
+        <p>
+          <a
+            className={s.link} href="/third-party-licenses.txt"
+            target="_blank" rel="noopener noreferrer"
+          >Сторонние библиотеки и их лицензии</a>
+        </p>
       </div>
     </Glass>
   )

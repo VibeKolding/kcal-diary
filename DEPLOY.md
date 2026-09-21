@@ -79,7 +79,7 @@ Netlify и Cloudflare Pages берут их из `public/_headers`, Netlify пр
   дальше идёт собственная заставка приложения.
 - **Внутри** — полный экран, без адресной строки и кнопок браузера.
 
-Иконки пересобираются командой:
+Иконки пересобираются командой (нужен Python 3 с Pillow: `pip3 install pillow`):
 
 ```bash
 python3 scripts/build-icons.py

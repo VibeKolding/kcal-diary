@@ -5,6 +5,7 @@ import { NumberField, parseNumber } from '@/ui/NumberField'
 import { Icon } from '@/ui/Icon'
 import { tap } from '@/ui/haptic'
 import { useToast } from '@/ui/Toast'
+import { ancestry, guardFocus } from '@/ui/focus'
 import { humanDay, plural } from '@/domain/dates'
 import type { Exercise } from '@/domain/gym'
 import type { WorkoutSet } from '@/domain/types'
@@ -74,7 +75,9 @@ export function WorkoutLog({ exercise }: { exercise: Exercise }) {
     startRest()
   }
 
-  async function remove(x: WorkoutSet) {
+  async function remove(x: WorkoutSet, chip: HTMLElement) {
+    const focused = document.activeElement === chip
+    const trail = ancestry(chip)
     await deleteSet(x.id)
     tap()
     // Удаление без подтверждения, зато с откатом — как у записей дневника:
@@ -83,6 +86,9 @@ export function WorkoutLog({ exercise }: { exercise: Exercise }) {
       text: `Подход удалён: ${setText(x)}`,
       action: { label: 'Отменить', onClick: () => restoreSet(x) },
     })
+    // Фишка исчезнет вместе с фокусом на ней: с клавиатуры он переходит на
+    // «Отменить» в тосте, а не падает в начало страницы
+    if (focused) guardFocus(chip, trail)
   }
 
   const days = groupByDate(sets)
@@ -131,7 +137,7 @@ export function WorkoutLog({ exercise }: { exercise: Exercise }) {
                   <button
                     key={x.id} className={`${s.set} num pressable`}
                     aria-label={`Удалить подход ${setText(x)}`}
-                    onClick={() => void remove(x)}
+                    onClick={(e) => void remove(x, e.currentTarget)}
                   >
                     {x.weightKg > 0 ? `${x.weightKg}×` : ''}{x.reps}
                     <Icon name="close" size={12} className={s.setX} />

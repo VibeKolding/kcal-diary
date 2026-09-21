@@ -37,16 +37,35 @@ export function tabStep<T>(list: readonly T[], active: T | null, inside: boolean
   return !inside || active === last ? first : null
 }
 
+/**
+ * Шаг по кругу: следующий или предыдущий элемент списка; null — активного
+ * в списке нет. Нужен, когда в круг входит элемент вне панели (тост):
+ * обычный шаг браузера до него не дойдёт.
+ */
+export function ringStep<T>(list: readonly T[], active: T | null, back: boolean): T | null {
+  const i = active === null ? -1 : list.indexOf(active)
+  if (i < 0 || list.length === 0) return null
+  return list[(i + (back ? -1 : 1) + list.length) % list.length] ?? null
+}
+
 export function trapTab(e: KeyboardEvent, box: HTMLElement): void {
   const list = tabbables(box)
+  // «Отменить» в тосте лежит вне панели, но относится к тому, что в ней
+  // только что сделали (удалённый подход в карточке упражнения). Без него
+  // в круге Tab до отмены с клавиатуры было не дойти, пока панель открыта
+  const toast = document.querySelector<HTMLElement>('[data-toast-action]')
+  const withToast = !!toast && !box.contains(toast) && toast.getClientRects().length > 0
+  if (withToast) list.push(toast)
   if (list.length === 0) {
     e.preventDefault()
     focusQuietly(box)
     return
   }
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const inside = !!active && active !== box && box.contains(active)
-  const next = tabStep(list, active, inside, e.shiftKey)
+  const inside = !!active && active !== box && (box.contains(active) || (withToast && active === toast))
+  const next = withToast
+    ? ringStep(list, active, e.shiftKey) ?? tabStep(list, active, inside, e.shiftKey)
+    : tabStep(list, active, inside, e.shiftKey)
   if (next) {
     e.preventDefault()
     focusQuietly(next)

@@ -11,6 +11,10 @@ import { ToastProvider } from './ui/Toast'
 import { Backdrop } from './app/Backdrop'
 import { App } from './app/App'
 import { ErrorBoundary } from './app/ErrorBoundary'
+// Слушатель beforeinstallprompt должен встать до события Chrome, а оно
+// приходит ещё на заставке. Модуль и так в первом чанке через профиль;
+// импорт страхует на случай, если профиль когда-нибудь станет ленивым
+import './features/install/useInstall'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

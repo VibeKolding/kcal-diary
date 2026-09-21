@@ -135,6 +135,12 @@ export interface NewFoodInput {
 }
 
 export async function createFood(input: NewFoodInput): Promise<Food> {
+  // Последний рубеж: формы и разбор ответа Open Food Facts уже проверяют
+  // числа, но NaN или минус в базе продуктов тихо портили бы каждую запись
+  // с этим продуктом, а резервная копия с ним перестала бы читаться
+  const { kcal, protein, fat, carbs } = input.per100
+  const bad = [kcal, protein, fat, carbs].some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < 0)
+  if (bad) throw new Error('Некорректная пищевая ценность')
   const food: Food = {
     id: newId('f'),
     name: input.name.trim(),

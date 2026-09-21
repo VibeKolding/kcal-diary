@@ -86,14 +86,18 @@ export async function isFavorite(kind: FavoriteKind, id: string): Promise<boolea
   return (await db.favorites.get(key(kind, id))) !== undefined
 }
 
+/** Чтение и запись — одной транзакцией, как у воды и счётчиков: два быстрых
+    касания звезды иначе оба видели «нет» и оба ставили отметку */
 export async function toggleFavorite(kind: FavoriteKind, id: string): Promise<boolean> {
   const k = key(kind, id)
-  if (await db.favorites.get(k)) {
-    await db.favorites.delete(k)
-    return false
-  }
-  await db.favorites.put({ key: k, createdAt: Date.now() })
-  return true
+  return db.transaction('rw', db.favorites, async () => {
+    if (await db.favorites.get(k)) {
+      await db.favorites.delete(k)
+      return false
+    }
+    await db.favorites.put({ key: k, createdAt: Date.now() })
+    return true
+  })
 }
 
 /** Id избранного одного вида, недавние сверху */

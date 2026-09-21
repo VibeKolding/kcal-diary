@@ -11,7 +11,9 @@
   background: var(--glass);
   color: var(--text-dim);
 }
-.search:focus-within { border-color: var(--glass-border); }
+/* Фокус — непрозрачным кольцом, как у TextField: смена прозрачности
+   рамки давала 1.4:1 к фону и с клавиатуры не читалась */
+.search:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 
 /* Поле с лупой — label: касание по лупе тоже ставит курсор в поле */
 .searchField {

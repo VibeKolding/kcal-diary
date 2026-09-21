@@ -4,7 +4,7 @@
 
 .row {
   display: flex; align-items: center; gap: var(--s3);
-  width: 100%; padding: var(--s2) 0; text-align: left;
+  width: 100%; min-height: var(--h-md); padding: var(--s2) 0; text-align: left;
 }
 .rowBody { flex: 1; min-width: 0; }
 .rowName { font-size: var(--fs-base); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -38,7 +38,7 @@
 .ingBody { flex: 1; min-width: 0; }
 .ingName { font-size: var(--fs-ui); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ingGrams {
-  width: 74px; height: var(--h-sm); flex: none;
+  width: 74px; height: var(--h-md); flex: none;
   border-radius: var(--radius-chip);
   border: 1px solid var(--glass-border-soft);
   background: var(--glass);
@@ -47,6 +47,9 @@
   font-variant-numeric: tabular-nums;
   text-align: center; outline: none;
 }
+/* outline снят ради скругления, поэтому фокус показывает рамка — непрозрачная,
+   как у TextField: смена прозрачности с клавиатуры не читалась */
+.ingGrams:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 
 .hint { font-size: var(--fs-sm); color: var(--text-faint); line-height: 1.5; }
 .warn { color: var(--danger); }

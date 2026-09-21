@@ -27,6 +27,15 @@ describe('журнал подходов', () => {
     expect(s.reps).toBe(1)
   })
 
+  it('два быстрых касания звезды ставят и снимают отметку, а не ставят дважды', async () => {
+    const [first, second] = await Promise.all([
+      toggleFavorite('exercise', 'chest-pushup'),
+      toggleFavorite('exercise', 'chest-pushup'),
+    ])
+    expect([first, second]).toEqual([true, false])
+    expect(await favoriteIds('exercise')).toEqual([])
+  })
+
   it('рекорд считается по всем подходам, а не по показанным', async () => {
     // Самый старый подход — лучший, за ним 34 подхода полегче
     await db.sets.put({ id: 's-old', date: '2026-08-01', exerciseId: 'deadlift', weightKg: 100, reps: 5, createdAt: 1 })

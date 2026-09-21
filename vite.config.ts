@@ -41,6 +41,60 @@ function dropRepoFiles(): Plugin {
   }
 }
 
+/**
+ * Лицензии сторонних библиотек, уехавших в сборку. Часть из них (Dexie,
+ * Fuse.js — Apache-2.0) требует прикладывать свой текст к каждой копии, а
+ * выложенный сайт — это копия. Список берётся из графа модулей самой
+ * сборки: в файл попадает ровно то, что получает человек, и при смене
+ * зависимостей ничего не нужно помнить.
+ */
+function thirdPartyLicenses(): Plugin {
+  const NOTICE_FILE = /^(licen[cs]e|copying|notice)(\.(md|txt))?$/i
+  return {
+    name: 'kcal:third-party-licenses',
+    apply: 'build',
+    generateBundle() {
+      const dirs = new Set<string>()
+      for (const id of this.getModuleIds()) {
+        // Последний node_modules в пути — сам пакет, а не тот, кто его
+        // притащил. \0 в начале — служебные обёртки над CommonJS того же пакета
+        const path = id.replace(/^\0/, '').replace(/\?.*$/, '')
+        const m = /^(.*[\\/]node_modules[\\/](?:@[^\\/]+[\\/])?[^\\/]+)[\\/]/.exec(path)
+        if (m) dirs.add(m[1]!)
+      }
+      const blocks = [...dirs]
+        .map((dir) => {
+          const meta = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+            name: string, version: string, license?: string
+          }
+          const texts = readdirSync(dir)
+            .filter((f) => NOTICE_FILE.test(f))
+            .sort()
+            .map((f) => readFileSync(join(dir, f), 'utf8').trim())
+          return { meta, texts }
+        })
+        .sort((a, b) => a.meta.name.localeCompare(b.meta.name))
+        .map(({ meta, texts }) => [
+          `==== ${meta.name} ${meta.version} — ${meta.license ?? 'лицензия не указана'} ====`,
+          texts.length ? texts.join('\n\n') : '(пакет не приложил текст лицензии)',
+        ].join('\n\n'))
+      const head = [
+        'Дневник калорий — сторонние компоненты',
+        'Third-party components shipped with this app',
+        '',
+        'Сам дневник распространяется на условиях файла LICENSE его автора.',
+        'Компоненты ниже принадлежат своим авторам и остаются под своими лицензиями.',
+      ].join('\n')
+      this.emitFile({
+        type: 'asset',
+        fileName: 'third-party-licenses.txt',
+        // BOM: хостинг может отдать .txt без charset, и кириллица поедет
+        source: '\uFEFF' + [head, ...blocks].join('\n\n\n') + '\n',
+      })
+    },
+  }
+}
+
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8')) as {
   version: string
   author: string
@@ -60,6 +114,7 @@ export default defineConfig({
   plugins: [
     react(),
     dropRepoFiles(),
+    thirdPartyLicenses(),
     VitePWA({
       registerType: 'prompt',
       // Регистрирует сам useAppUpdate (src/app/swUpdate.ts) — иначе
@@ -84,7 +139,7 @@ export default defineConfig({
             icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }],
           },
         ],
-        description: 'Личный дневник питания. Работает без интернета, данные не покидают устройство.',
+        description: 'Личный дневник питания. Работает без интернета, дневник хранится только на устройстве.',
         lang: 'ru',
         start_url: '/',
         scope: '/',
@@ -107,7 +162,9 @@ export default defineConfig({
       },
       workbox: {
         // Весь шелл, шрифты и вшитая база продуктов кладутся в кэш при установке.
-        globPatterns: ['**/*.{js,css,html,woff2,png,svg,json,webp}'],
+        // .txt — лицензии сторонних библиотек: ссылка на них есть в профиле,
+        // и офлайн она не должна вести в никуда
+        globPatterns: ['**/*.{js,css,html,woff2,png,svg,json,webp,txt}'],
         // Снимки упражнений в предкэш не попадают: их почти семьдесят, и
         // при установке они утроили бы вес приложения ради картинок, до
         // которых большинство не дойдёт. Они кэшируются по факту открытия.
@@ -116,6 +173,9 @@ export default defineConfig({
         globIgnores: ['**/images/gym/ex/**', 'sw-*.js'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: '/index.html',
+        // Переход по ссылке на файл — тоже навигация, и без исключения
+        // воркер отвечал бы на неё страницей приложения вместо текста
+        navigateFallbackDenylist: [/\.txt$/],
         // Нажатие на напоминание открывает дневник. generateSW своих
         // обработчиков уведомлений не пишет, а без notificationclick
         // нажатие на уведомление из воркера ничего не делало.

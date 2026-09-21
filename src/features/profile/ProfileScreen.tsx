@@ -194,7 +194,10 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
           <span className={s.cardTitle}>Тема</span>
         </div>
         <div className={s.themeRow}>
+          {/* Выбранная тема видна не только цветом рамки: aria-pressed
+              говорит о ней и скринридеру */}
           <button
+            type="button" aria-pressed={theme === 'dark'}
             className={`${s.themeCard} ${theme === 'dark' ? s.themeOn : ''}`}
             onClick={() => { setTheme('dark'); void updateProfile({ theme: 'dark' }) }}
           >
@@ -205,6 +208,7 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
             <div className={s.themeName}>Тёмное стекло</div>
           </button>
           <button
+            type="button" aria-pressed={theme === 'light'}
             className={`${s.themeCard} ${theme === 'light' ? s.themeOn : ''}`}
             onClick={() => { setTheme('light'); void updateProfile({ theme: 'light' }) }}
           >
@@ -283,7 +287,7 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
 
         <p className={`${s.note} ${stale ? s.warn : ''}`} style={{ marginBottom: 'var(--s4)' }}>
           {stale
-            ? 'Копии больше недели нет. Данные хранятся только в этом браузере — очистка сайта сотрёт дневник без возможности восстановления.'
+            ? `${lastBackup === null ? 'Копии ещё не было.' : 'Копии больше недели нет.'} Данные хранятся только в этом браузере — очистка сайта сотрёт дневник без возможности восстановления.`
             : 'Данные хранятся только на этом устройстве. Файл копии — единственный способ перенести дневник на другой телефон.'}
         </p>
 
@@ -296,6 +300,12 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
             телефоне закончится место.
           </p>
         )}
+        {persist === 'denied' && (
+          <p className={`${s.note} ${s.warn}`} style={{ marginBottom: 'var(--s4)' }}>
+            Браузер не согласился держать данные постоянно: при нехватке места
+            он вправе их вычистить. Сохраняйте копию почаще.
+          </p>
+        )}
         {persist === 'skipped' && (
           <p className={s.note} style={{ marginBottom: 'var(--s4)' }}>
             Дневник открыт во вкладке браузера. Вынесите его на домашний экран —
@@ -306,7 +316,7 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
         {space?.tight && (
           <p className={`${s.note} ${s.warn}`} style={{ marginBottom: 'var(--s4)' }}>
             На устройстве почти не осталось места ({Math.round(space.free / 1024 / 1024)} МБ).
-            Освободите его и скачайте копию: при нехватке места система чистит
+            Освободите его и сохраните копию: при нехватке места система чистит
             данные сайтов в первую очередь.
           </p>
         )}
@@ -535,10 +545,10 @@ function ProfileForm({
         {goal !== 'keep' && (
           <div className={s.field}>
             <span className={s.label}>Темп, кг в неделю</span>
-            <div className={s.optionList}>
+            <div className={s.optionList} role="radiogroup" aria-label="Темп, кг в неделю">
               {GOAL_RATES[goal].map((r) => (
                 <button
-                  key={r} type="button"
+                  key={r} type="button" role="radio" aria-checked={rate === r}
                   className={`${s.option} ${rate === r ? s.optionOn : ''} num`}
                   onClick={() => form.set('rate', r)}
                 >{r}</button>

@@ -53,6 +53,9 @@ interface Props {
 
 export function AddFood({ open, meal, date, profile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('search')
+  // Штрихкод, которого не нашлось в базах: форма «Вручную» сохранит его
+  // вместе с продуктом, и следующий скан найдёт продукт сразу, без сети
+  const [scannedCode, setScannedCode] = useState<string | null>(null)
   const [activeMeal, setActiveMeal] = useState<Meal>(() => meal ?? mealForTime())
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Food[]>([])
@@ -96,11 +99,18 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
       // на «Ужине» — и следующий перекус молча уходил в ужин
       setActiveMeal(meal ?? mealForTime())
       setTab('search'); setQuery(''); setDishSource('mine'); setOpenedDish(null); setQuick('')
+      setScannedCode(null)
       setQuickOpen(false); setQp(''); setQf(''); setQc('')
       // Частое: то, что добавляли чаще всего. Функция была, кнопки — нет.
       void frequentFoods(8).then(setFrequent)
     }
   }, [open, meal])
+
+  // Код относится только к переходу «сканер → Вручную»: ушли на другую
+  // вкладку — продукт, введённый потом, к этому коду отношения не имеет
+  useEffect(() => {
+    if (tab !== 'manual') setScannedCode(null)
+  }, [tab])
 
   useEffect(() => {
     let cancelled = false
@@ -235,7 +245,7 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
           {tab === 'scan' && (
             <Scanner
               onFound={(food) => setPicked(food)}
-              onManual={() => setTab('manual')}
+              onManual={(code) => { setScannedCode(code ?? null); setTab('manual') }}
             />
           )}
 
@@ -283,7 +293,7 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
           )}
 
           {tab === 'manual' && (
-            <ManualForm onCreated={(food) => setPicked(food)} />
+            <ManualForm barcode={scannedCode} onCreated={(food) => setPicked(food)} />
           )}
 
           {tab === 'recipes' && (
@@ -345,7 +355,13 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS) as FoodCategory[]
 
-function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
+interface ManualFormProps {
+  /** Прочитанный сканером код, которого нет ни в одной базе */
+  barcode?: string | null
+  onCreated: (food: Food) => void
+}
+
+function ManualForm({ barcode, onCreated }: ManualFormProps) {
   const { pending, run } = useSave()
   const [name, setName] = useState('')
   const [category, setCategory] = useState<FoodCategory>('dish')
@@ -375,7 +391,7 @@ function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
   // два, и «Частое» с «Недавним» расходились между ними
   function submit() {
     void run(async () => {
-      onCreated(await createFood({ name, category, per100 }))
+      onCreated(await createFood({ name, category, per100, ...(barcode ? { barcode } : {}) }))
     })
   }
 
@@ -411,6 +427,12 @@ function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
         <p className={s.error} role="alert">{problem}</p>
       ) : !kcal && derivedKcal > 0 && (
         <p className={s.hint}>Калорийность посчитана из БЖУ: {derivedKcal} ккал на 100 г.</p>
+      )}
+
+      {barcode && (
+        <p className={s.hint}>
+          Штрихкод {barcode} сохранится вместе с продуктом — в следующий раз скан найдёт его сразу.
+        </p>
       )}
 
       <Pill block disabled={!valid || pending} onClick={submit}>Сохранить продукт</Pill>

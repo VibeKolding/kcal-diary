@@ -20,12 +20,11 @@
   outline: none;
   text-align: center;
 }
-.gramsInput:focus { border-color: var(--glass-border); }
-/* Смена прозрачности рамки с клавиатуры почти не видна — нужно кольцо.
-   --focus-ring, если он есть в токенах, иначе приглушённый текст:
-   он держит контраст 3:1 к фону в обеих темах */
+.gramsInput:focus { border-color: var(--focus-ring); }
+/* Смена прозрачности рамки с клавиатуры почти не видна — нужно кольцо
+   цвета --focus-ring: он держит контраст выше 3:1 к фону в обеих темах */
 .gramsInput:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--text-dim));
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .gramsInput[aria-invalid='true'] { border-color: var(--danger); }
@@ -61,7 +60,7 @@
 }
 /* Без этого у ползунка с клавиатуры не было никакого признака фокуса */
 .slider:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--text-dim));
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .slider::-webkit-slider-thumb {

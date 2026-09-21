@@ -5,7 +5,8 @@ import { MEAL_LABELS } from '@/domain/nutrition'
 import { bestStreak, currentStreak, verdict, type DayStat } from '@/domain/streaks'
 import { db } from '@/db/db'
 import { entriesForRange } from '@/db/entries'
-import { waterForRange, weightsForRange } from '@/db/tracking'
+import { waterForRange, weightHistory, weightsForRange } from '@/db/tracking'
+import { FORECAST_POINTS, goalForecast, type GoalForecast } from '@/domain/weight'
 
 export interface DayPoint extends DayStat {
   nutrients: Nutrients
@@ -251,6 +252,11 @@ export interface Report {
   water: WaterRecord[]
   streaks: Streaks
   missed: number
+  /**
+   * Прогноз «до цели» — по последним взвешиваниям вообще, а не по точкам
+   * периода: иначе отчёты расходились бы с «Сегодня» и профилем
+   */
+  forecast: GoalForecast | null
 }
 
 /**
@@ -263,13 +269,14 @@ export async function buildReport(profile: Profile, count: number): Promise<Repo
   const days = lastDays(count)
   const from = days[0]!
   const today = days[days.length - 1]!
-  const [entries, dates, weights, water] = await Promise.all([
+  const [entries, dates, weights, water, recent] = await Promise.all([
     entriesForRange(from, today),
     loggedDates(),
     // По датам, а не по числу записей: раньше «неделя» показывала семь
     // последних взвешиваний, даже если они разбросаны по полугоду
     weightsForRange(from, today),
     waterForRange(from, today),
+    weightHistory(FORECAST_POINTS),
   ])
   const points = daysFromEntries(profile, days, entries)
   return {
@@ -280,6 +287,7 @@ export async function buildReport(profile: Profile, count: number): Promise<Repo
     water,
     streaks: diaryStreaks(dates, today),
     missed: missedDays(points, diaryStart(profile, dates[0]), today),
+    forecast: profile.targetWeightKg ? goalForecast(recent, profile.targetWeightKg, profile) : null,
   }
 }
 

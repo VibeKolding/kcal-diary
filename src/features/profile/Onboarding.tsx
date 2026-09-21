@@ -289,10 +289,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 <span className={s.label}>
                   Темп, кг в неделю
                 </span>
-                <div className={s.segment}>
+                <div className={s.segment} role="radiogroup" aria-label="Темп, кг в неделю">
                   {GOAL_RATES[goal].map((r) => (
                     <button
-                      key={r} type="button"
+                      key={r} type="button" role="radio" aria-checked={ratePerWeek === r}
                       className={`${s.segItem} ${ratePerWeek === r ? s.segItemOn : ''} num`}
                       onClick={() => setRatePerWeek(r)}
                     >{r}</button>

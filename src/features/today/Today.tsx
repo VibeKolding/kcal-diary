@@ -6,13 +6,13 @@ import { Bar } from '@/ui/Bar'
 import { Pill } from '@/ui/Pill'
 import { FoodIcon } from '@/ui/FoodIcon'
 import { MealIcon } from '@/ui/MealIcon'
-import { MEALS, MEAL_LABELS, sumByMeal, sumEntries, entryNutrients } from '@/domain/nutrition'
+import { MEALS, MEAL_LABELS, sumByMeal, sumEntries, entryNutrients, isMacroBlind } from '@/domain/nutrition'
 import { humanDay, shiftDay, weekdayShort } from '@/domain/dates'
 import type { Entry, Meal, Profile } from '@/domain/types'
 import { entriesForDay, copyDay } from '@/db/entries'
-import { getWater, addWater, latestWeight } from '@/db/tracking'
+import { getWater, addWater, weightHistory } from '@/db/tracking'
 import { getMeta } from '@/db/db'
-import { humanWeeks, weeksToTarget } from '@/domain/weight'
+import { FORECAST_POINTS, goalForecast, humanWeeks } from '@/domain/weight'
 import { buildDays, buildStreaks } from '@/features/analytics/data'
 import { verdict } from '@/domain/streaks'
 import { tap } from '@/ui/haptic'
@@ -82,7 +82,9 @@ export function Today({ profile, onAdd }: Props) {
   const loaded = loadedEntries !== undefined
   const entries = loadedEntries ?? []
   const water = useLiveQuery(() => getWater(date), [date]) ?? 0
-  const weight = useLiveQuery(() => latestWeight(), [])
+  // Прогноз «до цели» — тот же, что в профиле и отчётах (goalForecast):
+  // тренд последних взвешиваний, а без него — темп из анкеты
+  const weights = useLiveQuery(() => weightHistory(FORECAST_POINTS), [])
   const glass = profile.glassMl ?? 250
   const noticeSeen = useLiveQuery(() => getMeta<boolean>(STORAGE_NOTICE_SEEN, false), [])
 
@@ -99,9 +101,8 @@ export function Today({ profile, onAdd }: Props) {
     addWater(ml, date).then(() => tap(), (e: unknown) => toast({ text: saveErrorText(e) }))
   }
 
-  const rate = profile.goal === 'lose' ? -profile.ratePerWeek : profile.goal === 'gain' ? profile.ratePerWeek : 0
-  const toGoal = weight && profile.targetWeightKg
-    ? { kg: profile.targetWeightKg - weight.kg, weeks: weeksToTarget(weight.kg, profile.targetWeightKg, rate) }
+  const toGoal = weights && profile.targetWeightKg
+    ? goalForecast(weights, profile.targetWeightKg, profile)
     : null
   const total = sumEntries(entries)
   const byMeal = sumByMeal(entries)
@@ -168,13 +169,13 @@ export function Today({ profile, onAdd }: Props) {
 
           {(toGoal || week) && (
             <div className={`${s.strip} num`}>
-              {toGoal && Math.abs(toGoal.kg) >= 0.05 && (
+              {toGoal && Math.abs(toGoal.gapKg) >= 0.05 && (
                 <span>
-                  до цели {Math.abs(toGoal.kg).toFixed(1)} кг
+                  до цели {Math.abs(toGoal.gapKg).toFixed(1)} кг
                   {toGoal.weeks !== null && toGoal.weeks > 0 && ` · ${humanWeeks(toGoal.weeks)}`}
                 </span>
               )}
-              {toGoal && Math.abs(toGoal.kg) < 0.05 && <span>вы у цели</span>}
+              {toGoal && Math.abs(toGoal.gapKg) < 0.05 && <span>вы у цели</span>}
               {week && <span>неделя {week.hit}/7 в норме · серия {week.streak}</span>}
             </div>
           )}
@@ -264,7 +265,11 @@ export function Today({ profile, onAdd }: Props) {
                         <span className={s.entryBody}>
                           <div className={s.entryName}>{e.title}</div>
                           <div className={`${s.entryMeta} num`}>
-                            {Math.round(e.grams)} г · Б {n.protein.toFixed(1)} · Ж {n.fat.toFixed(1)} · У {n.carbs.toFixed(1)}
+                            {/* Быстрая запись без состава знает одни калории:
+                                «Б 0.0 · Ж 0.0 · У 0.0» выдавало бы неизвестное за ноль */}
+                            {isMacroBlind(e)
+                              ? (e.refId ? `${Math.round(e.grams)} г · состав неизвестен` : 'состав неизвестен')
+                              : `${Math.round(e.grams)} г · Б ${n.protein.toFixed(1)} · Ж ${n.fat.toFixed(1)} · У ${n.carbs.toFixed(1)}`}
                           </div>
                         </span>
                         <span className={`${s.entryKcal} num`}>{Math.round(n.kcal)}</span>

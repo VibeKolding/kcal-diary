@@ -131,6 +131,8 @@
 
 .option {
   height: var(--h-md);
+  /* «1» в темпе без этого был 34 px в ширину — мимо пальца */
+  min-width: var(--h-md);
   padding: 0 var(--s3);
   border-radius: var(--radius-chip);
   border: 1px solid var(--glass-border-soft);

@@ -171,6 +171,19 @@ describe('отчёт целиком', () => {
     expect(r.missed).toBe(0)
   })
 
+  it('прогноз до цели — общий, по последним взвешиваниям, а не по периоду', async () => {
+    const target = { ...profile, targetWeightKg: 75 }
+    // Взвешивания месяц назад, за неделю — ни одного: тренд периода пуст,
+    // а прогноз всё равно есть и совпадает с «Сегодня» и профилем
+    for (let i = 0; i < 5; i++) await db.weights.put({ date: shiftDay(today, -30 - i * 3), kg: 80 + i * 0.3 })
+    const r = await buildReport(target, 7)
+    expect(r.weights).toHaveLength(0)
+    expect(r.forecast).toMatchObject({ currentKg: 80, gapKg: -5, basis: 'trend' })
+    expect(r.forecast?.weeks).toBeGreaterThan(0)
+    // Без целевого веса прогноза нет
+    expect((await buildReport(profile, 7)).forecast).toBeNull()
+  })
+
   it('вес и вода приходят и без записей еды', async () => {
     for (let i = 0; i < 7; i++) {
       await db.weights.put({ date: shiftDay(today, -i), kg: 80 - i / 10 })

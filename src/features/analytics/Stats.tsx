@@ -10,7 +10,7 @@ import type { Profile } from '@/domain/types'
 import { weekdayShort, humanDay, plural } from '@/domain/dates'
 import { accuracy, averageKcal, verdict } from '@/domain/streaks'
 import { deviation } from '@/domain/nutrition'
-import { humanWeeks, movingAverage, weeklyTrend, weeksToTarget } from '@/domain/weight'
+import { humanWeeks, movingAverage, weeklyTrend } from '@/domain/weight'
 import { buildReport, averageMacros, periodTotals, type PeriodTotals, type Report } from './data'
 import { DayTooltip, type ChartDay } from './DayTooltip'
 import { Delta } from '@/ui/Delta'
@@ -83,18 +83,18 @@ export function Stats({ profile }: { profile: Profile }) {
 function ReportCards({ profile, report }: { profile: Profile; report: Report }) {
   // Период берётся из самого отчёта, а не из выбранной вкладки: пока новый
   // отчёт собирается, подписи должны соответствовать показанным цифрам
-  const { days, points, habits, weights, water, streaks, missed } = report
+  const { days, points, habits, weights, water, streaks, missed, forecast } = report
   const loggedCount = points.filter((p) => p.logged).length
   const avg = Math.round(averageKcal(points))
   const { macros, days: macroDays, skipped: macroSkipped } = averageMacros(points)
   const totals = periodTotals(points, profile.targets)
   const hit = Math.round(accuracy(points) * 100)
 
+  // Темп за период — только подпись карточки. Срок до цели считается
+  // общим прогнозом (goalForecast), как на «Сегодня» и в профиле
   const trend = weeklyTrend(weights)
   const smoothed = movingAverage(weights)
   const lastKg = weights[weights.length - 1]?.kg
-  const goalWeeks = lastKg && profile.targetWeightKg && trend !== null
-    ? weeksToTarget(lastKg, profile.targetWeightKg, trend) : null
 
   const waterDays = water.filter((w) => w.ml > 0)
   const waterAvg = waterDays.length
@@ -322,12 +322,17 @@ function ReportCards({ profile, report }: { profile: Profile; report: Report }) 
               {trend !== null ? `${trend > 0 ? '+' : ''}${trend.toFixed(2)} кг/нед` : `${lastKg} кг`}
             </span>
           </div>
-          {goalWeeks !== null && profile.targetWeightKg && (
+          {forecast && forecast.weeks !== null && forecast.weeks > 0 && profile.targetWeightKg && (
             <p className={`${s.forecast} num`}>
-              До {profile.targetWeightKg} кг при таком темпе — {humanWeeks(goalWeeks)}
+              До {profile.targetWeightKg} кг {forecast.basis === 'trend' ? 'при таком темпе' : 'по темпу из анкеты'}
+              {' — '}{humanWeeks(forecast.weeks)}
             </p>
           )}
-          {trend !== null && profile.targetWeightKg && goalWeeks === null && (
+          {forecast && forecast.weeks === 0 && (
+            <p className={s.forecast}>Вы у цели.</p>
+          )}
+          {/* По плану «поддерживать» темпа нет — это не «не в ту сторону» */}
+          {forecast && forecast.weeks === null && forecast.basis === 'trend' && (
             <p className={s.forecast}>Вес идёт не в сторону цели — прогноза нет.</p>
           )}
           {/* Как и у калорий: график скрыт от скринридера, числа — в списке */}
