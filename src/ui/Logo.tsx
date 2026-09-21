@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { LEAF_PATH, veinsPath } from './leaf'
 import s from './Logo.module.css'
 
 /**
@@ -7,10 +8,10 @@ import s from './Logo.module.css'
  * Кольцо — то же самое, что встречает на главном экране, только с разрывом,
  * поэтому знак и интерфейс читаются как одно целое.
  *
- * solid — лист залит, без прожилки. Такой знак стоит заглушкой на заставке,
- * пока едет объёмный: у того лист сплошной, и контурный лист превращал
- * подмену в смену знака вместо появления объёма. Везде, где знак стоит
- * сам по себе, он остаётся контурным.
+ * solid — лист залит и прорезан теми же прожилками, что у объёмного знака.
+ * Такой знак стоит заглушкой на заставке, пока едет объёмный: контурный
+ * лист, как и лист без прорезей, превращал подмену в смену знака вместо
+ * появления объёма. Везде, где знак стоит сам по себе, он контурный.
  */
 /**
  * Во сколько раз плоская заглушка меньше холста объёмного знака.
@@ -29,6 +30,10 @@ export function Logo({ size = 96, animated = false, solid = false }: {
   // кадров не рисует (фоновая вкладка, экономия энергии), класс не появится
   // и знак останется просто видимым — вместо пустого экрана.
   const [enter, setEnter] = useState(false)
+  // Прорези считаются только для залитого листа: контурному они не нужны,
+  // а он стоит в профиле и на онбординге
+  const cuts = useMemo(() => (solid ? veinsPath() : null), [solid])
+  const maskId = `leafCuts${useId().replace(/:/g, '')}`
   useEffect(() => {
     if (!animated) return
     const id = requestAnimationFrame(() => setEnter(true))
@@ -46,6 +51,14 @@ export function Logo({ size = 96, animated = false, solid = false }: {
             <stop offset="0%" stopColor="var(--gold-1)" />
             <stop offset="100%" stopColor="var(--gold-2)" />
           </linearGradient>
+          {/* Маска, а не дыры в самом пути: лист утолщён обводкой, и она
+              заливала бы концы прорезей у края */}
+          {cuts && (
+            <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+              <rect width="100" height="100" fill="#fff" />
+              <path d={cuts} fill="#000" />
+            </mask>
+          )}
         </defs>
 
         {/* Разрыв кольца сверху справа — там же, где на кольце калорий
@@ -63,11 +76,8 @@ export function Logo({ size = 96, animated = false, solid = false }: {
 
         {/* Один лист вместо двух: на размере иконки две половины сливались
             и знак читался как чужая фигура. */}
-        <g className={`${s.leaf} ${solid ? s.leafSolid : ''}`}>
-          <path
-            d="M36 64c0-15 10-26 28-30 2 17-6 30-20 33-4 1-8-1-8-3Z"
-            strokeWidth="4.5"
-          />
+        <g className={`${s.leaf} ${solid ? s.leafSolid : ''}`} mask={cuts ? `url(#${maskId})` : undefined}>
+          <path d={LEAF_PATH} strokeWidth="4.5" />
           {!solid && <path d="M39 66c6-8 13-14 21-18" strokeWidth="4.5" />}
         </g>
       </svg>

@@ -24,7 +24,9 @@ export function ThreeEmblem({ size = 224 }: { size?: number }) {
 
     async function load() {
       const { createEmblemScene } = await import('./scene')
-      return createEmblemScene(canvas!, size, Math.min(2, window.devicePixelRatio || 1))
+      // Полная плотность экрана: при прежнем потолке в два на трёхкратном
+      // экране кадр растягивался в полтора раза, и прорези листа мылились
+      return createEmblemScene(canvas!, size, window.devicePixelRatio || 1)
     }
 
     load().then((sc) => {

@@ -1,15 +1,14 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js'
+import { createLeafGeometry, createLeafShadowGeometry } from './leafGeometry'
 
 /**
  * 3D-сцена эмблемы: кольцо с разрывом и лист из золотого стекла.
  *
  * Геометрия повторяет SVG-знак: кольцо r=40 толщиной 6 в поле 100×100,
- * разрыв вверху справа, лист по тому же пути.
+ * разрыв вверху справа, лист по тому же пути и с теми же прорезями.
  */
 
-const LEAF_PATH = 'M36 64c0-15 10-26 28-30 2 17-6 30-20 33-4 1-8-1-8-3Z'
 const GOLD_1 = 0xF2D99B
 const GOLD_2 = 0xC9952B
 
@@ -45,9 +44,20 @@ function glowTexture(): THREE.Texture {
   return t
 }
 
+/**
+ * dpr — плотность экрана. Кадр рисуется вдвое крупнее (но не больше шести
+ * точек на пиксель) и сжимается браузером: это сглаживает не только края,
+ * как встроенное сглаживание, но и блики. Тонкий блик по кромке листа при
+ * встроенном сглаживании шёл пунктиром — оно усредняет только покрытие
+ * треугольника, а не цвет внутри него.
+ */
 export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dpr = 1) {
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: true })
-  renderer.setPixelRatio(dpr)
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, premultipliedAlpha: true })
+  renderer.setPixelRatio(Math.min(dpr * 2, 6))
+  // Стекло берёт то, что за ним, из отдельного кадра. Непрозрачных тел в
+  // сцене нет, кадр однотонный, и его разрешение на картинку не влияет —
+  // а в полном размере он занимал бы больше памяти, чем сам знак.
+  renderer.transmissionResolutionScale = 0.25
   renderer.setSize(cssSize, cssSize, false)
   renderer.setClearColor(0x000000, 0)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -107,29 +117,25 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
   ringGroup.add(ring, capA, capB)
   root.add(ringGroup)
 
-  // --- Лист: тот же путь, что в SVG, выдавлен с фаской ---
-  const svg = new SVGLoader().parse(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${LEAF_PATH}"/></svg>`)
-  const shapes = svg.paths.flatMap((p) => SVGLoader.createShapes(p))
-  const leafGeo = new THREE.ExtrudeGeometry(shapes, {
-    depth: 5, bevelEnabled: true, bevelThickness: 1.6, bevelSize: 1.4, bevelSegments: 4, curveSegments: 24,
-  })
-  // SVG: y вниз, начало в углу; сцена: y вверх, центр в (50,50)
-  leafGeo.translate(-50, -50, -2.5)
-  leafGeo.scale(1, -1, 1)
-  leafGeo.computeVertexNormals()
+  // --- Лист: тот же контур, что в SVG, со сквозными прорезями прожилок ---
+  const leafGeo = createLeafGeometry()
   const leafMat = glassMaterial(GOLD_2, 0.45)
   leafMat.attenuationDistance = 12
-  const leaf = new THREE.Mesh(leafGeo, leafMat)
+  // Кромки прорезей видны почти по касательной, а под таким углом любое
+  // стекло отражает окружение почти целиком — белым. Щель обводилась
+  // серебряной чертой. Металл окрашивает отражение своим цветом, и кромка
+  // остаётся золотой, только глубже лицевой грани — как срез толстого стекла.
+  const cutMat = new THREE.MeshPhysicalMaterial({
+    color: GOLD_2, metalness: 0.9, roughness: 0.28, envMapIntensity: 1.1,
+  })
+  const leaf = new THREE.Mesh(leafGeo, [leafMat, cutMat])
   leaf.position.z = 6
   root.add(leaf)
 
-  /*
-   * Прожилки на листе нет намеренно. Сквозная прорезь в детали такого
-   * размера показывает то, что за ней, а за ней — свечение знака и
-   * бегущий свет. От фазы света щель читалась то золотой щербиной, то
-   * белой чертой, будто лист подчеркнули карандашом. Стабильного вида
-   * у неё не получается, поэтому лист остаётся цельным.
-   */
+  // Маска глубины по контуру листа: за прорезями — фон, а не свечение
+  const shadowGeo = createLeafShadowGeometry()
+  const shadow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ colorWrite: false }))
+  leaf.add(shadow)
 
   const easeOut = (x: number) => 1 - Math.pow(1 - x, 3)
   // Лёгкий перелёт в конце — лист «распускается», а не просто вырастает
@@ -174,6 +180,9 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
     pmrem.dispose()
     renderer.dispose()
     leafGeo.dispose()
+    shadowGeo.dispose()
+    leafMat.dispose()
+    cutMat.dispose()
     ringGeo.dispose()
     cap.dispose()
   }
