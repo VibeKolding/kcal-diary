@@ -101,7 +101,10 @@ def identify(name, cat):
     scored = sorted(((score(title), eid, audience) for eid, title, audience in cat), reverse=True)
     (fwd, back), eid, audience = scored[0]
     (fwd2, back2), _, _ = scored[1]
-    if fwd < 0.8:
+    # Одно слово из трёх-четырёх может не совпасть — «поднятия» вместо
+    # «подъём», опечатка, — и это не повод отказывать, если никакое другое
+    # упражнение даже близко не подходит.
+    if fwd < 0.8 and not (fwd >= 0.6 and fwd - fwd2 >= 0.4):
         return None, 'название не узнано'
     if fwd - fwd2 < 0.2 and back - back2 < 0.2:
         return None, 'название подходит сразу к двум упражнениям'
