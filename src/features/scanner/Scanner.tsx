@@ -6,6 +6,8 @@ import type { BarcodeFormat as ZxingFormat } from '@zxing/browser'
 import { lookupProduct, type OffLookup } from './openfoodfacts'
 import { PRODUCT_FORMATS, isProductBarcode, type ProductFormat } from './barcode'
 import { Spinner } from '@/ui/Spinner'
+import { Icon } from '@/ui/Icon'
+import { sendTorch, torchFailText, trackHasTorch } from './torch'
 import s from './Scanner.module.css'
 
 /** Почему продукт не нашёлся: от этого зависит, что посоветовать */
@@ -38,6 +40,26 @@ type BarcodeDetectorCtor = new (o: { formats: string[] }) => {
   detect: (src: CanvasImageSource) => Promise<{ rawValue: string; format?: string }[]>
 }
 
+/**
+ * Часть Android объявляет фонарик не сразу, а когда камера уже отдаёт
+ * кадры. Если на старте света не нашлось, смотрим ещё раз через это время —
+ * и всё: дальше кнопка не появится, ничего не дёргается.
+ */
+const TORCH_RECHECK_MS = 800
+/** Сколько держать сообщение о неудаче с фонариком в строке состояния */
+const TORCH_NOTE_MS = 3000
+
+/** Фонарик живого потока: чья дорожка, горит ли свет и ждём ли ответа камеры */
+interface Torch {
+  track: MediaStreamTrack
+  on: boolean
+  busy: boolean
+  onEnded: () => void
+}
+
+/** Кнопки нет, свет выключен, свет горит */
+type TorchView = 'none' | 'off' | 'on'
+
 function stopTracks(stream: MediaStream): void {
   stream.getTracks().forEach((t) => t.stop())
 }
@@ -64,17 +86,111 @@ export function Scanner({ onFound, onManual }: Props) {
    */
   const runRef = useRef(0)
   const [state, setState] = useState<State>({ kind: 'idle' })
+  const torchRef = useRef<Torch | null>(null)
+  const torchProbeRef = useRef(0)
+  const torchNoteRef = useRef(0)
+  // Каждое включение камеры начинается с выключенного света
+  const [torch, setTorch] = useState<TorchView>('none')
+  const [torchNote, setTorchNote] = useState<string | null>(null)
+
+  /*
+   * Кнопку отцепляем от дорожки раньше, чем дорожку остановят. Ответ на уже
+   * отправленную команду придёт к объекту, которого в torchRef больше нет,
+   * и ничего не зажжёт: ни кнопку, ни новую команду остановленной камере.
+   */
+  const dropTorch = useCallback(() => {
+    const t = torchRef.current
+    torchRef.current = null
+    clearTimeout(torchProbeRef.current)
+    clearTimeout(torchNoteRef.current)
+    setTorch('none')
+    setTorchNote(null)
+    if (!t) return
+    t.track.removeEventListener('ended', t.onEnded)
+    // Свет гаснет вместе с камерой, но выключаем его и явно, пока дорожка
+    // ещё жива: фонарик, забытый гореть в кармане, — худший исход, и одной
+    // остановке дорожки здесь доверять не хочется. Ответ уже никому не нужен
+    if (t.on) sendTorch(t.track, false).catch(() => {})
+  }, [])
 
   const stop = useCallback(() => {
     stopRef.current?.()
     stopRef.current = null
+    dropTorch()
     if (streamRef.current) stopTracks(streamRef.current)
     streamRef.current = null
     lookupRef.current?.abort()
     lookupRef.current = null
-  }, [])
+  }, [dropTorch])
 
   useEffect(() => () => { runRef.current += 1; stop() }, [stop])
+
+  /*
+   * Включить или выключить свет. Кнопка откликается сразу, не дожидаясь
+   * камеры; откажет камера — кнопка вернётся назад, а под кадром появится
+   * короткое сообщение. Пока ответа нет, новые нажатия не копятся в очередь.
+   */
+  const switchTorch = useCallback((want: boolean) => {
+    const send = (t: Torch, want: boolean) => {
+      t.busy = true
+      t.on = want
+      clearTimeout(torchNoteRef.current)
+      setTorchNote(null)
+      setTorch(want ? 'on' : 'off')
+      sendTorch(t.track, want).then(
+        () => {
+          // Сканер уже остановлен или перезапущен: этот свет больше не наш
+          if (torchRef.current !== t) return
+          t.busy = false
+          // Пока камера включала свет, приложение успели свернуть
+          if (t.on && document.hidden) send(t, false)
+        },
+        () => {
+          if (torchRef.current !== t) return
+          t.busy = false
+          t.on = !want
+          setTorch(t.on ? 'on' : 'off')
+          setTorchNote(torchFailText(want))
+          torchNoteRef.current = window.setTimeout(() => setTorchNote(null), TORCH_NOTE_MS)
+        },
+      )
+    }
+    const t = torchRef.current
+    if (t && !t.busy && t.on !== want) send(t, want)
+  }, [])
+
+  // Свернули приложение — свет гасим: камера может ещё работать, но светить
+  // в кармане незачем. Вернутся к сканеру — включат снова одним нажатием
+  useEffect(() => {
+    const onVisibility = () => { if (document.hidden) switchTorch(false) }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [switchTorch])
+
+  /*
+   * Кнопка фонарика появляется, только если камера сама объявила свет.
+   * Спрашиваем, когда видео уже играет, и один раз чуть позже — см.
+   * TORCH_RECHECK_MS. Поток сверяем со streamRef: остановленный или
+   * сменённый поток кнопку уже не получит.
+   */
+  const watchTorch = useCallback((stream: MediaStream) => {
+    const track = stream.getVideoTracks()[0]
+    if (!track) return
+    const probe = (): boolean => {
+      if (streamRef.current !== stream || torchRef.current) return true
+      if (!trackHasTorch(track)) return false
+      const t: Torch = {
+        track, on: false, busy: false,
+        // Камеру отняла система или другое приложение: кнопка светить уже не сможет
+        onEnded: () => { if (torchRef.current === t) dropTorch() },
+      }
+      track.addEventListener('ended', t.onEnded)
+      torchRef.current = t
+      setTorch('off')
+      return true
+    }
+    if (!probe()) torchProbeRef.current = window.setTimeout(probe, TORCH_RECHECK_MS)
+  }, [dropTorch])
 
   const handleCode = useCallback(async (code: string) => {
     stop()
@@ -149,6 +265,7 @@ export function Scanner({ onFound, onManual }: Props) {
       // Дальше поток лежит в streamRef, и его погасил тот, кто сменил номер
       if (stale()) return
       setState({ kind: 'scanning' })
+      watchTorch(stream)
 
       const Detector = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector
 
@@ -214,13 +331,24 @@ export function Scanner({ onFound, onManual }: Props) {
           : 'Камера недоступна. Введите продукт вручную.',
       })
     }
-  }, [handleCode, stop])
+  }, [handleCode, stop, watchTorch])
 
   return (
     <div className={s.wrap}>
       <div className={s.viewport}>
         <video ref={videoRef} className={s.video} playsInline muted />
         {state.kind === 'scanning' && <div className={s.reticle} />}
+        {state.kind === 'scanning' && torch !== 'none' && (
+          <button
+            type="button"
+            className={`${s.torch} ${torch === 'on' ? s.torchOn : ''}`}
+            aria-label="Фонарик"
+            aria-pressed={torch === 'on'}
+            onClick={() => switchTorch(torch !== 'on')}
+          >
+            <Icon name="flashlight" size={20} />
+          </button>
+        )}
         {(state.kind === 'idle' || state.kind === 'error') && (
           <div className={s.placeholder}>
             <span>
@@ -232,9 +360,10 @@ export function Scanner({ onFound, onManual }: Props) {
         )}
       </div>
 
-      <div className={`${s.status} ${state.kind === 'error' ? s.error : ''}`}>
+      {/* Строка читается вслух: иначе отказ фонарика незрячий человек не узнает */}
+      <div className={`${s.status} ${state.kind === 'error' ? s.error : ''}`} aria-live="polite">
         {state.kind === 'starting' && <><Spinner size={15} /> Включаем камеру…</>}
-        {state.kind === 'scanning' && 'Ищем штрихкод в кадре…'}
+        {state.kind === 'scanning' && (torchNote ?? 'Ищем штрихкод в кадре…')}
         {state.kind === 'looking' && <><Spinner size={15} /> Ищем продукт…</>}
       </div>
 

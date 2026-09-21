@@ -25,6 +25,8 @@ const PATHS = {
   trash: <><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></>,
   bell: <><path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15z" /><path d="M10 21h4" /></>,
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 1.5M9 2h6" /></>,
+  // Фонарик головой вверх: раструб, корпус и кнопка на нём
+  flashlight: <><path d="M7 3h10v3l-2.5 4v9.5A1.5 1.5 0 0 1 13 21h-2a1.5 1.5 0 0 1-1.5-1.5V10L7 6z" /><path d="M7 6h10M12 13.5v2" /></>,
 } satisfies Record<string, ReactNode>
 
 export type IconName = keyof typeof PATHS

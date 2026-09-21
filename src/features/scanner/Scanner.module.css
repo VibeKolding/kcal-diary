@@ -21,6 +21,59 @@
   pointer-events: none;
 }
 
+/*
+ * Фонарик — в правом нижнем углу кадра: туда тянется большой палец, и там
+ * кнопка не закрывает середину, где ищется штрихкод. Кружок 36 px, зона
+ * касания 44 — как у крестика панели и звезды. Отступ 8 px держит кружок
+ * внутри скругления кадра.
+ *
+ * Лежит кнопка на видео, а не на стекле, поэтому подложка у неё своя,
+ * из токенов --media-*: белая упаковка и тёмный стол не должны её съедать.
+ * Плашка плотная, без размытия: кнопка лежит внутри панели с
+ * backdrop-filter, а фильтры поверх таких поверхностей в проекте под запретом.
+ */
+.torch {
+  position: absolute;
+  right: var(--s2);
+  bottom: var(--s2);
+  display: grid;
+  place-items: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  border-radius: 50%;
+  border: 1px solid var(--media-btn-edge);
+  background: var(--media-btn);
+  color: var(--media-btn-ink);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-press) var(--ease);
+}
+/* Отступ считается от внутренней стороны рамки, отсюда лишний пиксель */
+.torch::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--h-sm) - var(--h-md)) / 2 - 1px);
+  border-radius: 50%;
+}
+.torch:active { transform: var(--press-strong); }
+/* Рамка фокуса ложится на подложку противоположного тона: за кнопкой
+   видео, и без неё рамка терялась бы на кадре того же цвета */
+.torch:focus-visible { box-shadow: 0 0 0 2px var(--focus-halo); }
+
+.torchOn {
+  background: var(--media-btn-on);
+  color: var(--media-btn-on-ink);
+  border-color: var(--media-btn-on-edge);
+}
+
+/* На узком телефоне угол рамки прицела подходит к кнопке фонарика
+   вплотную. Прицел чуть уже — распознаванию это не мешает, оно идёт
+   по всему кадру, а рамка только подсказывает, куда навести */
+@media (max-width: 360px) {
+  .reticle { inset: 18% 15%; }
+}
+
 .placeholder {
   position: absolute;
   inset: 0;
