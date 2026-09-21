@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Meal } from '@/domain/types'
 import { dayKey } from '@/domain/dates'
-import { getProfile } from '@/db/profile'
+import { getProfile, syncAutoTargets } from '@/db/profile'
 import { seedFoods } from '@/db/seed'
 import { Onboarding } from '@/features/profile/Onboarding'
 import { Today } from '@/features/today/Today'
@@ -29,7 +29,7 @@ import { ensurePersistentStorage } from '@/db/persist'
 import { useReminders } from '@/features/reminders/useReminders'
 import { addWater } from '@/db/tracking'
 import { useToast } from '@/ui/Toast'
-import { viewedDay } from '@/features/today/useToday'
+import { useToday, viewedDay } from '@/features/today/useToday'
 import s from './App.module.css'
 
 export function App() {
@@ -116,6 +116,19 @@ export function App() {
    * места. Поэтому запуск на этот вызов не смотрит и его не ждёт.
    */
   useEffect(() => { void ensurePersistentStorage() }, [])
+
+  /*
+   * Авторасчётная норма сверяется с формулой при запуске и со сменой дня.
+   * Пересчитывается она только по поводу — взвешивание, анкета, — а план
+   * меняется и без повода: профиль, сохранённый прежней версией, не знал
+   * пределов снижения, а подростку со временем исполняется 18. Без сверки
+   * «Сегодня» вело бы по старой норме, пока человек не взвесится. Сбой
+   * сверки не мешает работать — остаётся прежняя норма (syncAutoTargets).
+   */
+  const today = useToday()
+  useEffect(() => {
+    void syncAutoTargets().catch((error: unknown) => console.error(error))
+  }, [today])
 
   const loading = !ready || profile === undefined
 

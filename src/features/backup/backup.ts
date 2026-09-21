@@ -1,5 +1,6 @@
 import { db, getMeta, setMeta, META } from '@/db/db'
 import { invalidateIndex } from '@/db/foods'
+import { syncAutoTargets } from '@/db/profile'
 import { dayKey } from '@/domain/dates'
 import type { Theme } from '@/domain/types'
 import {
@@ -117,6 +118,13 @@ export async function importBackup(file: File): Promise<ImportResult> {
   const result = await db.transaction('rw', restoreTables(), async () => {
     const undo = await saveRestorePoint()
     const counts = await applyBackup(data, theme)
+    // Норма в копии посчитана той версией, что её сохранила, и тогда, когда
+    // её сохранили: без пределов снижения, в другом возрасте. Авторасчётная
+    // норма сверяется с формулой сразу, а не при следующем взвешивании —
+    // иначе после переезда «Сегодня» вело бы по старому дефициту (см.
+    // syncAutoTargets). Только здесь, не в «Вернуть как было»: та должна
+    // вернуть дневник в точности, а он и так был сверен при запуске.
+    await syncAutoTargets()
     await setMeta(META.onboarded, true)
     // Весь дневник сейчас совпадает с файлом, который у человека на руках,
     // — напоминать о копии сразу после переезда незачем

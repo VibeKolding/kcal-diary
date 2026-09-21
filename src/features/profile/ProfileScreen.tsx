@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import {
-  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES, ageFrom, targetsForProfile,
+  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES, ageFrom, lossOptions, safePlan, targetsForProfile,
 } from '@/domain/targets'
 import type { Activity, Goal, Profile, Sex } from '@/domain/types'
 import { NumberField, parseNumber } from '@/ui/NumberField'
@@ -23,6 +23,9 @@ import { AboutCard } from './AboutCard'
 import { useDraft } from './useDraft'
 import { birthDateAfterEdit, checkNormForm, normFormFrom, normValuesFrom } from './norm'
 import { exportedText, restoredText } from './restore'
+import {
+  UNDERWEIGHT_NOTE, limitPick, lossLimitHint, planNote, shownRate,
+} from './limits'
 import { useTheme } from '@/app/theme'
 import s from './ProfileScreen.module.css'
 
@@ -271,7 +274,7 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
 
       <WeightCard profile={profile} onSaved={say} />
 
-      <ProfileForm profile={profile} onSaved={say} />
+      <ProfileForm profile={profile} weightKg={latest?.kg ?? null} onSaved={say} />
 
       <ReminderCard />
 
@@ -380,11 +383,16 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
  *
  * Цель и активность меняются со временем, а от них зависит вся норма —
  * поэтому анкета должна быть изменяемой, а не только для чтения.
+ *
+ * weightKg — последнее взвешивание: от него считаются пределы снижения
+ * (ИМТ 18,5 и 1 % веса). null — взвешиваний нет, действует только возраст.
  */
 function ProfileForm({
-  profile, onSaved,
-}: { profile: Profile; onSaved: (text: string) => void }) {
+  profile, weightKg, onSaved,
+}: { profile: Profile; weightKg: number | null; onSaved: (text: string) => void }) {
   const [open, setOpen] = useState(false)
+  const goalNoteId = useId()
+  const paceHintId = useId()
   const form = useDraft<{
     sex: Sex; age: string; height: string; activity: Activity; goal: Goal; rate: number
   }>({
@@ -423,6 +431,30 @@ function ProfileForm({
     ? 'От 100 до 250 см' : null
   const valid = ageValue !== null && heightValue !== null && !ageError && !heightError
 
+  // План, по которому сейчас на самом деле считаются норма и прогноз: анкета
+  // после пределов (safePlan). В сводке показываем его, а не сохранённый
+  // выбор — иначе строка «1 кг/нед» спорила бы с нормой на 0,25.
+  const savedAge = ageFrom(profile.birthDate)
+  const plan = safePlan({
+    goal: profile.goal, ratePerWeek: profile.ratePerWeek,
+    weightKg, heightCm: profile.heightCm, age: savedAge,
+  })
+  const note = planNote(plan, profile.targetsManual)
+
+  // Пределы в форме — от того, что в ней набрано. Пока в поле ошибка,
+  // берётся сохранённое: иначе на время набора «17» варианты мигали бы
+  // то доступными, то нет.
+  const formAge = ageValue !== null && !ageError ? ageValue : savedAge
+  const loss = lossOptions({
+    weightKg,
+    heightCm: heightValue !== null && !heightError ? heightValue : profile.heightCm,
+    age: formAge,
+  })
+  // Отмеченный выбор — приведённый к пределам (как в онбординге): поменяли
+  // возраст на 16 — отмеченным встаёт 0,25, и сохранится именно он
+  const pick = limitPick(goal, rate, loss)
+  const paceHint = pick.goal === 'lose' ? lossLimitHint(loss, formAge) : null
+
   function pickGoal(next: Goal) {
     form.set('goal', next)
     const rates = GOAL_RATES[next]
@@ -436,8 +468,8 @@ function ProfileForm({
       birthDate: birthDateAfterEdit(profile.birthDate, ageValue),
       heightCm: heightValue,
       activity,
-      goal,
-      ratePerWeek: goal === 'keep' ? 0 : rate,
+      goal: pick.goal,
+      ratePerWeek: pick.goal === 'keep' ? 0 : pick.rate,
     })
     // Норму пересчитываем от актуального веса, если её не задавали руками
     const w = await latestWeight()
@@ -479,11 +511,12 @@ function ProfileForm({
           <div className={s.row}>
             <span className={s.rowLabel}>Цель</span>
             <span className={s.rowValue}>
-              {GOAL_LABELS[profile.goal].title}
-              {profile.goal !== 'keep' && ` · ${profile.ratePerWeek} кг/нед`}
+              {GOAL_LABELS[plan.goal].title}
+              {plan.goal !== 'keep' && ` · ${shownRate(plan)} кг/нед`}
             </span>
           </div>
         </div>
+        {note && <p className={`${s.note} ${s.planNote}`}>{note}</p>}
       </Glass>
     )
   }
@@ -531,29 +564,49 @@ function ProfileForm({
 
         <div className={s.field}>
           <span className={s.label}>Цель</span>
-          <div className={s.optionList} role="radiogroup" aria-label="Цель">
-            {(Object.keys(GOAL_LABELS) as Goal[]).map((g) => (
-              <button
-                key={g} type="button" role="radio" aria-checked={goal === g}
-                className={`${s.option} ${goal === g ? s.optionOn : ''}`}
-                onClick={() => pickGoal(g)}
-              >{GOAL_LABELS[g].title}</button>
-            ))}
+          {/* Недоступный вариант виден, но выключен; причина — текстом под
+              списком, скринридер читает её через aria-describedby */}
+          <div
+            className={s.optionList} role="radiogroup" aria-label="Цель"
+            aria-describedby={loss.canLose ? undefined : goalNoteId}
+          >
+            {(Object.keys(GOAL_LABELS) as Goal[]).map((g) => {
+              const off = g === 'lose' && !loss.canLose
+              return (
+                <button
+                  key={g} type="button" role="radio" aria-checked={pick.goal === g}
+                  disabled={off} aria-disabled={off || undefined}
+                  className={`${s.option} ${pick.goal === g ? s.optionOn : ''}`}
+                  onClick={() => pickGoal(g)}
+                >{GOAL_LABELS[g].title}</button>
+              )
+            })}
           </div>
+          {!loss.canLose && (
+            <p id={goalNoteId} className={s.note}>{UNDERWEIGHT_NOTE}</p>
+          )}
         </div>
 
-        {goal !== 'keep' && (
+        {pick.goal !== 'keep' && (
           <div className={s.field}>
             <span className={s.label}>Темп, кг в неделю</span>
-            <div className={s.optionList} role="radiogroup" aria-label="Темп, кг в неделю">
-              {GOAL_RATES[goal].map((r) => (
-                <button
-                  key={r} type="button" role="radio" aria-checked={rate === r}
-                  className={`${s.option} ${rate === r ? s.optionOn : ''} num`}
-                  onClick={() => form.set('rate', r)}
-                >{r}</button>
-              ))}
+            <div
+              className={s.optionList} role="radiogroup" aria-label="Темп, кг в неделю"
+              aria-describedby={paceHint ? paceHintId : undefined}
+            >
+              {GOAL_RATES[pick.goal].map((r) => {
+                const off = pick.goal === 'lose' && loss.options.find((o) => o.rate === r)?.allowed === false
+                return (
+                  <button
+                    key={r} type="button" role="radio" aria-checked={pick.rate === r}
+                    disabled={off} aria-disabled={off || undefined}
+                    className={`${s.option} ${s.rate} ${pick.rate === r ? s.optionOn : ''} num`}
+                    onClick={() => form.set('rate', r)}
+                  >{r}</button>
+                )
+              })}
             </div>
+            {paceHint && <p id={paceHintId} className={s.note}>{paceHint}</p>}
           </div>
         )}
 

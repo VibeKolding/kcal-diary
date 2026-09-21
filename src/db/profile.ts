@@ -1,7 +1,7 @@
 import type { Nutrients, Profile } from '@/domain/types'
-import { calcTargets, waterGoalFor, type TargetInput } from '@/domain/targets'
+import { calcTargets, targetsForProfile, waterGoalFor, type TargetInput } from '@/domain/targets'
 import { db, setMeta, META } from './db'
-import { putWeight } from './tracking'
+import { latestWeight, putWeight } from './tracking'
 import { ensurePersistentStorage } from './persist'
 import { dayKey } from '@/domain/dates'
 
@@ -62,21 +62,50 @@ export async function setManualTargets(targets: Nutrients): Promise<void> {
 export async function resetToAutoTargets(weightKg: number): Promise<Nutrients | null> {
   const profile = await getProfile()
   if (!profile) return null
-  const { targets } = calcTargets({
-    sex: profile.sex,
-    birthDate: profile.birthDate,
-    heightCm: profile.heightCm,
-    weightKg,
-    activity: profile.activity,
-    goal: profile.goal,
-    ratePerWeek: profile.ratePerWeek,
-  })
+  const { targets } = targetsForProfile(profile, weightKg)
   // Вода тоже идёт от веса: раньше она считалась один раз в онбординге
   // и дальше жила своей жизнью
   await db.profile.update(1, {
     targets, targetsManual: false, waterGoalMl: waterGoalFor(weightKg),
   })
   return targets
+}
+
+/**
+ * Сверить сохранённую авторасчётную норму с формулой и поправить, если
+ * разошлась. true — норма переписана.
+ *
+ * Норма хранится готовыми числами, а пересчитывается только по поводу:
+ * взвешивание, сохранение анкеты, «Вернуть авторасчёт». Но план, по
+ * которому она считается (safePlan), зависит ещё и от возраста, а профиль
+ * бывает посчитан другой версией приложения — старый дневник или копия из
+ * файла. Без сверки такой профиль жил бы со старым дефицитом до следующего
+ * взвешивания: подросток или человек с ИМТ ниже 18,5 видел бы на «Сегодня»
+ * норму на снижение, а в анкете — что снижение приостановлено. Поэтому
+ * сверка идёт при запуске, со сменой дня (исполнилось 18) и после
+ * восстановления из копии.
+ *
+ * Трогает только калории и БЖУ. Ручную норму не трогает — это выбор
+ * человека. Воду тоже: её можно поставить руками, а флага «вода вручную»
+ * нет, и сверка при каждом запуске стирала бы её молча. Без взвешиваний
+ * считать не от чего — норма остаётся как есть.
+ *
+ * Внутри транзакции импорта ждёт только запросов к базе, так что её можно
+ * звать и оттуда.
+ */
+export async function syncAutoTargets(now = new Date()): Promise<boolean> {
+  const profile = await getProfile()
+  if (!profile || profile.targetsManual) return false
+  const w = await latestWeight()
+  if (!w) return false
+  const { targets } = targetsForProfile(profile, w.kg, now)
+  if (sameNutrients(targets, profile.targets)) return false
+  await db.profile.update(1, { targets })
+  return true
+}
+
+function sameNutrients(a: Nutrients, b: Nutrients): boolean {
+  return a.kcal === b.kcal && a.protein === b.protein && a.fat === b.fat && a.carbs === b.carbs
 }
 
 /** Стереть всё: базу, тему, регистрацию воркера. Назад дороги нет. */

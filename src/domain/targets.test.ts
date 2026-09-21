@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ACTIVITY_FACTORS, GOAL_RATES, MAX_AUTO_WATER_ML, MIN_CARBS_SHARE, ageFrom, birthDateFromAge,
-  bmr, calcTargets, referenceWeight, splitMacros, tdee, waterGoalFor,
+  ACTIVITY_FACTORS, GOAL_RATES, MAX_AUTO_WATER_ML, MIN_CARBS_SHARE, TEEN_MAX_LOSS, ageFrom,
+  birthDateFromAge, bmi, bmr, calcTargets, canLose, lossOptions, maxLoss, referenceWeight,
+  safePlan, splitMacros, tdee, waterGoalFor,
 } from './targets'
 
 const NOW = new Date('2026-09-07T12:00:00')
@@ -86,7 +87,8 @@ describe('calcTargets', () => {
 
   it('не опускает норму ниже базового обмена', () => {
     const r = calcTargets({ ...base, goal: 'lose', ratePerWeek: 1 }, NOW)
-    // 2447.5 - 1100 = 1347.5, что ниже BMR 1780 → подъём до BMR
+    // темп урезан до 1 % от 80 кг: 2447.5 - 0.8×1100 = 1567.5, что ниже
+    // BMR 1780 → подъём до BMR
     expect(r.targets.kcal).toBe(1780)
     expect(r.clampedToBmr).toBe(true)
   })
@@ -232,5 +234,156 @@ describe('темпы по целям', () => {
   it('коэффициенты активности идут по возрастанию', () => {
     const values = Object.values(ACTIVITY_FACTORS)
     expect([...values].sort((a, b) => a - b)).toEqual(values)
+  })
+})
+
+describe('пределы снижения веса', () => {
+  const adult = { heightCm: 180, weightKg: 80, age: 30 }
+
+  it('ИМТ — килограммы на квадрат роста в метрах', () => {
+    expect(bmi(74, 200)).toBe(18.5)
+    expect(bmi(81, 180)).toBeCloseTo(25, 9)
+  })
+
+  it('взрослому с обычным весом оставляет план как есть', () => {
+    expect(safePlan({ ...adult, goal: 'lose', ratePerWeek: 0.5 }))
+      .toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: null })
+  })
+
+  it('ИМТ ровно 18,5 снижать ещё можно, чуть ниже — уже нет', () => {
+    // 74 кг при 200 см — ИМТ ровно 18,5
+    const edge = { heightCm: 200, age: 30, goal: 'lose' as const, ratePerWeek: 0.5 }
+    expect(canLose(74, 200)).toBe(true)
+    expect(safePlan({ ...edge, weightKg: 74 })).toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: null })
+    expect(canLose(73.9, 200)).toBe(false)
+    expect(safePlan({ ...edge, weightKg: 73.9 })).toEqual({ goal: 'keep', ratePerWeek: 0, limitedBy: 'underweight' })
+  })
+
+  it('не больше 1 % массы тела в неделю', () => {
+    // 50 кг при 160 см — ИМТ 19,5, снижать можно, но не быстрее 0,5 кг
+    const light = { heightCm: 160, weightKg: 50, age: 30, goal: 'lose' as const }
+    expect(safePlan({ ...light, ratePerWeek: 0.5 })).toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: null })
+    expect(safePlan({ ...light, ratePerWeek: 0.75 })).toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: 'share' })
+    expect(safePlan({ ...light, ratePerWeek: 1 })).toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: 'share' })
+  })
+
+  it('урезает до доли массы как есть, без округления к кнопкам', () => {
+    const p = safePlan({ heightCm: 170, weightKg: 63, age: 30, goal: 'lose', ratePerWeek: 1 })
+    expect(p.ratePerWeek).toBeCloseTo(0.63, 9)
+    expect(p.limitedBy).toBe('share')
+  })
+
+  it('до 18 лет — не быстрее 0,25 кг в неделю', () => {
+    const teen = { heightCm: 175, weightKg: 70, age: 17, goal: 'lose' as const }
+    expect(safePlan({ ...teen, ratePerWeek: 1 })).toEqual({ goal: 'lose', ratePerWeek: TEEN_MAX_LOSS, limitedBy: 'teen' })
+    expect(safePlan({ ...teen, ratePerWeek: 0.25 })).toEqual({ goal: 'lose', ratePerWeek: 0.25, limitedBy: null })
+    expect(safePlan({ ...teen, age: 18, ratePerWeek: 0.5 })).toEqual({ goal: 'lose', ratePerWeek: 0.5, limitedBy: null })
+  })
+
+  it('у подростка действует меньший из двух потолков, и назван именно он', () => {
+    // 24 кг при 110 см — ИМТ 19,8; 1 % массы — 0,24 кг, строже возрастного
+    const small = { heightCm: 110, weightKg: 24, age: 15, goal: 'lose' as const }
+    const p = safePlan({ ...small, ratePerWeek: 1 })
+    expect(p.ratePerWeek).toBeCloseTo(0.24, 9)
+    expect(p.limitedBy).toBe('share')
+    expect(safePlan({ ...small, ratePerWeek: 0.25 }).limitedBy).toBe('share')
+    // При 25 кг потолки совпадают — называется возраст
+    expect(maxLoss(25, 15)).toEqual({ rate: 0.25, by: 'teen' })
+    // Обычный подросток: возрастной потолок строже 1 %
+    expect(maxLoss(60, 15)).toEqual({ rate: 0.25, by: 'teen' })
+  })
+
+  it('недостаток веса важнее возраста', () => {
+    expect(safePlan({ heightCm: 170, weightKg: 45, age: 15, goal: 'lose', ratePerWeek: 0.25 }))
+      .toEqual({ goal: 'keep', ratePerWeek: 0, limitedBy: 'underweight' })
+  })
+
+  it('без взвешиваний действует только возраст', () => {
+    expect(safePlan({ heightCm: 180, weightKg: null, age: 30, goal: 'lose', ratePerWeek: 1 }))
+      .toEqual({ goal: 'lose', ratePerWeek: 1, limitedBy: null })
+    expect(safePlan({ heightCm: 180, weightKg: null, age: 16, goal: 'lose', ratePerWeek: 1 }))
+      .toEqual({ goal: 'lose', ratePerWeek: 0.25, limitedBy: 'teen' })
+    expect(maxLoss(null, 30)).toBeNull()
+    expect(canLose(null, 180)).toBe(true)
+  })
+
+  it('удержание и набор не трогает', () => {
+    const thin = { heightCm: 180, weightKg: 50, age: 15 }
+    expect(safePlan({ ...thin, goal: 'gain', ratePerWeek: 0.5 })).toEqual({ goal: 'gain', ratePerWeek: 0.5, limitedBy: null })
+    expect(safePlan({ ...thin, goal: 'keep', ratePerWeek: 0 })).toEqual({ goal: 'keep', ratePerWeek: 0, limitedBy: null })
+  })
+
+  describe('темпы для экрана', () => {
+    it('помечает недоступные темпы той же причиной, что и расчёт', () => {
+      const o = lossOptions({ heightCm: 160, weightKg: 50, age: 30 })
+      expect(o.canLose).toBe(true)
+      expect(o.cap).toEqual({ rate: 0.5, by: 'share' })
+      expect(o.options).toEqual([
+        { rate: 0.25, allowed: true, reason: null },
+        { rate: 0.5, allowed: true, reason: null },
+        { rate: 0.75, allowed: false, reason: 'share' },
+        { rate: 1, allowed: false, reason: 'share' },
+      ])
+    })
+
+    it('подростку оставляет только 0,25', () => {
+      const o = lossOptions({ heightCm: 175, weightKg: 70, age: 16 })
+      expect(o.options.map((x) => x.allowed)).toEqual([true, false, false, false])
+      expect(o.options.slice(1).every((x) => x.reason === 'teen')).toBe(true)
+    })
+
+    it('при недостатке веса снижение недоступно целиком', () => {
+      const o = lossOptions({ heightCm: 180, weightKg: 55, age: 30 })
+      expect(o.canLose).toBe(false)
+      expect(o.options.every((x) => !x.allowed && x.reason === 'underweight')).toBe(true)
+    })
+
+    it('без веса у взрослого ограничений нет', () => {
+      const o = lossOptions({ heightCm: 180, weightKg: null, age: 30 })
+      expect(o.cap).toBeNull()
+      expect(o.options.every((x) => x.allowed)).toBe(true)
+    })
+  })
+
+  describe('в расчёте нормы', () => {
+    const body = {
+      sex: 'female' as const, heightCm: 165, weightKg: 45, activity: 'light' as const,
+      birthDate: '1996-09-07',
+    }
+
+    it('при недостатке веса считает норму удержания, а не дефицит', () => {
+      // 45 кг при 165 см — ИМТ 16,5
+      const lose = calcTargets({ ...body, goal: 'lose', ratePerWeek: 1 }, NOW)
+      const keep = calcTargets({ ...body, goal: 'keep', ratePerWeek: 0 }, NOW)
+      expect(lose.targets).toEqual(keep.targets)
+      expect(lose.clampedToBmr).toBe(false)
+      expect(lose.plan).toEqual({ goal: 'keep', ratePerWeek: 0, limitedBy: 'underweight' })
+      expect(keep.plan).toEqual({ goal: 'keep', ratePerWeek: 0, limitedBy: null })
+    })
+
+    /* Возраст — на дату расчёта: 17 лет накануне дня рождения, 18 в сам день */
+    it('до 18 лет дефицит не больше, чем на 0,25 кг в неделю', () => {
+      const teen = {
+        sex: 'male' as const, heightCm: 175, weightKg: 70, activity: 'high' as const,
+        goal: 'lose' as const, ratePerWeek: 1,
+      }
+      const at17 = calcTargets({ ...teen, birthDate: '2008-09-08' }, NOW)
+      const slow = calcTargets({ ...teen, birthDate: '2008-09-08', ratePerWeek: 0.25 }, NOW)
+      expect(at17.plan).toEqual({ goal: 'lose', ratePerWeek: 0.25, limitedBy: 'teen' })
+      expect(at17.targets).toEqual(slow.targets)
+      // дефицит 0.25 × 7700 / 7 = 275 ккал
+      expect(at17.targets.kcal).toBe(Math.round((at17.tdee - 275) / 10) * 10)
+      expect(at17.clampedToBmr).toBe(false)
+
+      const at18 = calcTargets({ ...teen, birthDate: '2008-09-07' }, NOW)
+      expect(at18.plan.limitedBy).toBe('share')
+      expect(at18.plan.ratePerWeek).toBeCloseTo(0.7, 9)
+    })
+
+    it('на наборе при недостатке веса план не меняет', () => {
+      const r = calcTargets({ ...body, goal: 'gain', ratePerWeek: 0.25 }, NOW)
+      expect(r.plan).toEqual({ goal: 'gain', ratePerWeek: 0.25, limitedBy: null })
+      expect(r.targets.kcal).toBeGreaterThan(r.tdee)
+    })
   })
 })

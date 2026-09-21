@@ -11,6 +11,7 @@ import { db } from '@/db/db'
 import { resetToAutoTargets, updateProfile } from '@/db/profile'
 import { tap } from '@/ui/haptic'
 import { CountUp } from '@/ui/CountUp'
+import { belowHealthy, healthyMinKg } from './limits'
 import s from './WeightCard.module.css'
 
 /** Обхват в сантиметрах: ловим опечатку вроде «855» вместо «85,5» */
@@ -70,6 +71,11 @@ export function WeightCard({
   const targetParsed = parseNumber(target)
   const targetError = targetParsed !== null && (targetParsed < 30 || targetParsed > 300)
     ? 'От 30 до 300 кг' : null
+  // Цель ниже ИМТ 18,5 не запрещается — это решение человека, — но и не
+  // проходит молча: норма перестанет вести вниз, как только ИМТ опустится
+  // ниже 18,5 (safePlan), и до такой цели она всё равно не доведёт
+  const targetTooLow = targetParsed !== null && !targetError
+    && belowHealthy(targetParsed, profile.heightCm)
 
   // Прогноз — общий с «Сегодня» и отчётами (goalForecast): по реальному
   // тренду последних взвешиваний, если он есть, иначе по темпу из анкеты
@@ -93,8 +99,11 @@ export function WeightCard({
       if (c) rec.chest = c
       if (h) rec.hips = h
       await putWeight(rec)
-      // Норма считается от актуального веса — если её не задавали руками
-      if (!profile.targetsManual) await resetToAutoTargets(parsed)
+      // Норма считается от актуального веса — если её не задавали руками.
+      // От записанного, округлённого до 0,1: у границы ИМТ 18,5 введённые
+      // 53,46 и записанные 53,5 кг лежат по разные её стороны, и норма
+      // разошлась бы со сводкой анкеты и прогнозом, которые читают запись
+      if (!profile.targetsManual) await resetToAutoTargets(kg)
       tap()
       setValue(''); setWaist(''); setChest(''); setHips('')
       onSaved(profile.targetsManual
@@ -190,6 +199,13 @@ export function WeightCard({
           disabled={!!targetError || (targetParsed ?? 0) === (profile.targetWeightKg ?? 0)}
           onClick={saveTarget}>Сохранить</Pill>
       </div>
+
+      {targetTooLow && (
+        <p className={s.note}>
+          Это ниже здорового веса для вашего роста — нижняя граница
+          около {healthyMinKg(profile.heightCm)} кг.
+        </p>
+      )}
 
       {!profile.targetsManual && (
         <p className={s.note}>Норма калорий и воды пересчитается под новый вес.</p>

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import { Ring } from '@/ui/Ring'
@@ -6,8 +6,8 @@ import { Logo } from '@/ui/Logo'
 import { NumberField, parseNumber } from '@/ui/NumberField'
 import { Icon } from '@/ui/Icon'
 import {
-  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES,
-  birthDateFromAge, calcTargets, splitMacros, waterGoalFor,
+  ACTIVITY_LABELS, ADULT_AGE, GOAL_LABELS, GOAL_RATES,
+  birthDateFromAge, calcTargets, lossOptions, splitMacros, waterGoalFor,
 } from '@/domain/targets'
 import type { Activity, Goal, Sex } from '@/domain/types'
 import { createProfile, getProfile, setManualTargets } from '@/db/profile'
@@ -15,6 +15,10 @@ import { BackupError, importBackup } from '@/features/backup/backup'
 import { useTheme } from '@/app/theme'
 import { useToast } from '@/ui/Toast'
 import { KCAL_RANGE } from './norm'
+import {
+  LOSE_LOCKED_HINT, LOSE_PACE_HINT, TEEN_NORM_NOTE, UNDERWEIGHT_NOTE,
+  limitPick, lossLimitHint,
+} from './limits'
 import { restoredText } from './restore'
 import s from './Onboarding.module.css'
 
@@ -52,6 +56,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   const [manualKcal, setManualKcal] = useState('')
   const [saving, setSaving] = useState(false)
+  const goalNoteId = useId()
+  const paceHintId = useId()
 
   const ageField = validate(age, LIMITS.age)
   const heightField = validate(height, LIMITS.height)
@@ -60,8 +66,26 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const basicsReady =
     ageField.value !== null && heightField.value !== null && weightField.value !== null
 
+  // Пределы снижения (domain/targets): при ИМТ ниже 18,5 снижать нельзя,
+  // до 18 лет — не быстрее 0,25 кг, всем — не больше 1 % веса в неделю.
+  // Шаг цели открывается только после заполненного первого, так что там
+  // loss всегда есть.
+  const loss = basicsReady
+    ? lossOptions({ weightKg: weightField.value!, heightCm: heightField.value!, age: ageField.value! })
+    : null
+  const loseLocked = loss !== null && !loss.canLose
+  const teen = ageField.value !== null && ageField.value < ADULT_AGE
+  // Отмеченные цель и темп — выбор, приведённый к пределам. Считаются при
+  // каждом показе: вернулся к первому шагу и поменял вес — «Снизить вес»,
+  // стоящее по умолчанию, само становится удержанием, и до нормы человек
+  // с недоступной целью не дойдёт. Состояние выбора при этом не
+  // переписывается: вернул прежний вес — вернулся и прежний выбор.
+  const pick = limitPick(goal, ratePerWeek, loss)
+  const rate = pick.goal === 'keep' ? 0 : pick.rate
+
   // Смена цели меняет и разумный набор темпов: набирать по килограмму
-  // в неделю невозможно без набора жира, поэтому список для набора короче
+  // в неделю невозможно без набора жира, поэтому список для набора короче.
+  // Недоступный по пределам темп поправит limitPick.
   function pickGoal(next: Goal) {
     setGoal(next)
     const rates = GOAL_RATES[next]
@@ -76,11 +100,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       heightCm: heightField.value!,
       weightKg: weightField.value!,
       activity,
-      goal,
-      ratePerWeek: goal === 'keep' ? 0 : ratePerWeek,
+      goal: pick.goal,
+      ratePerWeek: rate,
     })
   }, [basicsReady, sex, ageField.value, heightField.value, weightField.value,
-      activity, goal, ratePerWeek])
+      activity, pick.goal, rate])
 
   const manualField = validate(manualKcal, LIMITS.kcal)
   const manual = manualField.value
@@ -89,7 +113,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // шли пересчитанные под ручные калории: 171 г на экране, 71 г в дневнике.
   // БЖУ под ручные калории делит та же функция, что и авторасчёт.
   const targets = result && manual !== null && basicsReady
-    ? splitMacros(manual, { weightKg: weightField.value!, heightCm: heightField.value!, goal })
+    ? splitMacros(manual, { weightKg: weightField.value!, heightCm: heightField.value!, goal: pick.goal })
     : result?.targets ?? null
   const belowBmr = result !== null && manual !== null && manual < result.bmr
 
@@ -103,8 +127,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         heightCm: heightField.value!,
         weightKg: weightField.value!,
         activity,
-        goal,
-        ratePerWeek: goal === 'keep' ? 0 : ratePerWeek,
+        goal: pick.goal,
+        ratePerWeek: rate,
         waterGoalMl: waterGoalFor(weightField.value!),
         theme,
       })
@@ -266,41 +290,61 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <h1 className={s.title}>Какая цель</h1>
           <p className={s.sub}>От неё зависит и норма калорий, и требования по белкам и жирам.</p>
           <div className={s.body}>
-            <div className={s.options} role="radiogroup" aria-label="Цель">
-              {(Object.keys(GOAL_LABELS) as Goal[]).map((g) => (
-                <button
-                  key={g} type="button" role="radio" aria-checked={goal === g}
-                  className={`${s.option} ${goal === g ? s.optionOn : ''}`}
-                  onClick={() => pickGoal(g)}
-                >
-                  <span>
-                    <div className={s.optionTitle}>{GOAL_LABELS[g].title}</div>
-                    <div className={s.optionHint}>{GOAL_LABELS[g].hint}</div>
-                  </span>
-                  <span className={`${s.check} ${goal === g ? s.checkOn : ''}`}>
-                    {goal === g && <Icon name="check" size={12} strokeWidth={3} />}
-                  </span>
-                </button>
-              ))}
+            {/* Недоступный вариант не прячется: человек видит, что снижение
+                есть, и читает рядом, почему не сейчас. disabled выводит кнопку
+                из обхода Tab, скринридер называет её недоступной, а причину
+                читает из пояснения под списком (aria-describedby). */}
+            <div
+              className={s.options} role="radiogroup" aria-label="Цель"
+              aria-describedby={loseLocked ? goalNoteId : undefined}
+            >
+              {(Object.keys(GOAL_LABELS) as Goal[]).map((g) => {
+                const off = g === 'lose' && loseLocked
+                return (
+                  <button
+                    key={g} type="button" role="radio" aria-checked={pick.goal === g}
+                    disabled={off} aria-disabled={off || undefined}
+                    className={`${s.option} ${pick.goal === g ? s.optionOn : ''}`}
+                    onClick={() => pickGoal(g)}
+                  >
+                    <span>
+                      <div className={s.optionTitle}>{GOAL_LABELS[g].title}</div>
+                      <div className={s.optionHint}>{off ? LOSE_LOCKED_HINT : GOAL_LABELS[g].hint}</div>
+                    </span>
+                    <span className={`${s.check} ${pick.goal === g ? s.checkOn : ''}`}>
+                      {pick.goal === g && <Icon name="check" size={12} strokeWidth={3} />}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
 
-            {goal !== 'keep' && (
+            {loseLocked && <p id={goalNoteId} className={s.hint}>{UNDERWEIGHT_NOTE}</p>}
+
+            {pick.goal !== 'keep' && (
               <div className={s.field}>
                 <span className={s.label}>
                   Темп, кг в неделю
                 </span>
-                <div className={s.segment} role="radiogroup" aria-label="Темп, кг в неделю">
-                  {GOAL_RATES[goal].map((r) => (
-                    <button
-                      key={r} type="button" role="radio" aria-checked={ratePerWeek === r}
-                      className={`${s.segItem} ${ratePerWeek === r ? s.segItemOn : ''} num`}
-                      onClick={() => setRatePerWeek(r)}
-                    >{r}</button>
-                  ))}
+                <div
+                  className={s.segment} role="radiogroup" aria-label="Темп, кг в неделю"
+                  aria-describedby={paceHintId}
+                >
+                  {GOAL_RATES[pick.goal].map((r) => {
+                    const off = pick.goal === 'lose' && loss?.options.find((o) => o.rate === r)?.allowed === false
+                    return (
+                      <button
+                        key={r} type="button" role="radio" aria-checked={pick.rate === r}
+                        disabled={off} aria-disabled={off || undefined}
+                        className={`${s.segItem} ${pick.rate === r ? s.segItemOn : ''} num`}
+                        onClick={() => setRatePerWeek(r)}
+                      >{r}</button>
+                    )
+                  })}
                 </div>
-                <p className={s.hint}>
-                  {goal === 'lose'
-                    ? 'Здоровый темп — до 1 % массы тела в неделю. Быстрее уходят мышцы, а не жир.'
+                <p id={paceHintId} className={s.hint}>
+                  {pick.goal === 'lose'
+                    ? (loss && lossLimitHint(loss, ageField.value!)) ?? LOSE_PACE_HINT
                     : 'Быстрее 0,5 кг в неделю мышцы не растут — остальное отложится жиром.'}
                 </p>
               </div>
@@ -358,6 +402,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                     лучше выбрать темп поменьше.
                   </p>
                 )}
+
+                {/* Миффлин–Сан Жеор выведен на взрослых: рост подростка
+                    требует энергии сверх формулы, при любой цели */}
+                {teen && <p className={s.note}>{TEEN_NORM_NOTE}</p>}
 
                 <NumberField
                   label="Норма калорий вручную" unit="ккал"

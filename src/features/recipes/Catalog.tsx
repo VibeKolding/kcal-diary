@@ -16,6 +16,8 @@ import { MEAL_LABELS, MEALS, scale } from '@/domain/nutrition'
 import { dayKey } from '@/domain/dates'
 import type { Meal, Profile } from '@/domain/types'
 import { addCatalogEntry } from '@/db/entries'
+import { latestWeight } from '@/db/tracking'
+import { ageFrom, safePlan } from '@/domain/targets'
 import {
   GOAL_TABS, RECIPE_MEALS, dishTokens, isBowl, loadCatalog,
   portionGrams, portionKcal,
@@ -51,8 +53,18 @@ export function CatalogBrowser({ profile, onOpen }: {
   const [back] = useState(() => resume)
   useEffect(() => { resume = null }, [])
 
-  // Каталог открывается на цели пользователя: чаще всего именно она ему и нужна
-  const [goal, setGoal] = useState<RecipeGoal>(back?.goal ?? profile.goal)
+  // Каталог открывается на цели пользователя: чаще всего именно она ему и нужна.
+  // Цель — та, по которой считается норма (safePlan): при ИМТ ниже 18,5
+  // «Снизить вес» считается как удержание, и открывать блюда для дефицита
+  // незачем. Вес приходит живым запросом, поэтому до выбора человека цель
+  // выводится при каждом показе, а не запоминается в первом рендере.
+  const latest = useLiveQuery(() => latestWeight(), [])
+  const planGoal = safePlan({
+    goal: profile.goal, ratePerWeek: profile.ratePerWeek,
+    weightKg: latest?.kg ?? null, heightCm: profile.heightCm, age: ageFrom(profile.birthDate),
+  }).goal
+  const [chosen, setGoal] = useState<RecipeGoal | null>(back?.goal ?? null)
+  const goal = chosen ?? planGoal
   const [meal, setMeal] = useState<RecipeMeal>(back?.meal ?? currentMeal())
   const [all, setAll] = useState<CatalogRecipe[]>([])
   const [loaded, setLoaded] = useState(false)

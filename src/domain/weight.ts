@@ -1,5 +1,6 @@
 import type { Goal, WeightRecord } from './types'
 import { parseDay, plural } from './dates'
+import { ageFrom, safePlan, type PlanLimit } from './targets'
 
 const DAY_MS = 86_400_000
 
@@ -89,6 +90,11 @@ export interface GoalForecast {
   rate: number
   /** Откуда темп: тренд взвешиваний или план из анкеты */
   basis: 'trend' | 'plan'
+  /**
+   * Предел, урезавший темп анкеты (см. safePlan). Только для basis 'plan':
+   * у тренда темп настоящий, и пределы к нему отношения не имеют — там null.
+   */
+  limitedBy: PlanLimit | null
 }
 
 /**
@@ -100,23 +106,38 @@ export interface GoalForecast {
  * тренд последних FORECAST_POINTS взвешиваний, а если по ним тренда ещё нет
  * (мало точек или они слишком близко) — темп из анкеты.
  *
+ * Темп из анкеты — после пределов (safePlan), от последнего веса и
+ * возраста на сегодня: тот же план, по которому посчитана норма. Иначе
+ * подростку с «1 кг в неделю» прогноз обещал бы срок вчетверо короче, чем
+ * позволяет его норма, а при недостатке веса — снижение, которого норма
+ * не даёт.
+ *
  * history — взвешивания по возрастанию даты, лучше всего weightHistory().
- * null — взвешиваний нет, считать не от чего.
+ * plan — обычно просто профиль. null — взвешиваний нет, считать не от чего.
  */
 export function goalForecast(
   history: WeightRecord[],
   targetKg: number,
-  plan: { goal: Goal; ratePerWeek: number },
+  plan: { goal: Goal; ratePerWeek: number; heightCm: number; birthDate: string },
+  now = new Date(),
 ): GoalForecast | null {
   const latest = history[history.length - 1]
   if (!latest) return null
   const trend = weeklyTrend(history.slice(-FORECAST_POINTS))
-  const rate = trend ?? planRate(plan.goal, plan.ratePerWeek)
+  const safe = safePlan({
+    goal: plan.goal,
+    ratePerWeek: plan.ratePerWeek,
+    weightKg: latest.kg,
+    heightCm: plan.heightCm,
+    age: ageFrom(plan.birthDate, now),
+  })
+  const rate = trend ?? planRate(safe.goal, safe.ratePerWeek)
   return {
     currentKg: latest.kg,
     gapKg: targetKg - latest.kg,
     weeks: weeksToTarget(latest.kg, targetKg, rate),
     rate,
     basis: trend === null ? 'plan' : 'trend',
+    limitedBy: trend === null ? safe.limitedBy : null,
   }
 }

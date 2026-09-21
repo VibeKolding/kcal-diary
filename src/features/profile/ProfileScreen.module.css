@@ -148,3 +148,17 @@
   background: var(--glass-strong);
   color: var(--text);
 }
+/* Недоступный по пределам вариант: пунктир без заливки — «нельзя нажать»
+   видно и без различения оттенков. Прозрачность не берём: подпись должна
+   читаться, причина написана под списком. */
+.option:disabled {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: default;
+}
+/* Темп выше предела ещё и зачёркнут: цифра без слов иначе не объясняет себя */
+.rate:disabled { text-decoration: line-through; }
+
+/* Строка под сводкой анкеты, когда пределы урезали план */
+.planNote { margin-top: var(--s3); }

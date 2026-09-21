@@ -76,6 +76,17 @@
 .optionTitle { font-weight: 700; font-size: var(--fs-base); }
 .optionHint { font-size: var(--fs-md); color: var(--text-dim); margin-top: 1px; }
 
+/* Недоступный по пределам вариант. Отличается не только цветом:
+   пунктирная рамка без заливки читается как «нельзя нажать» и без
+   различения оттенков. Подсказка-причина остаётся в полный --text-dim —
+   её надо прочесть. Прозрачность не берём: она гасит и причину. */
+.option:disabled {
+  border-style: dashed;
+  background: transparent;
+  cursor: default;
+}
+.option:disabled .optionTitle { color: var(--text-faint); }
+
 .check {
   margin-left: auto;
   width: 20px; height: 20px;
@@ -105,6 +116,12 @@
   transition: all var(--dur-fast) var(--ease);
 }
 .segItemOn { background: var(--glass-strong); color: var(--text); }
+/* Темп выше предела: зачёркнут — видно и без различения цветов */
+.segItem:disabled {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  cursor: default;
+}
 
 /* --- Итог --- */
 .result { display: grid; place-items: center; gap: var(--s5); padding: var(--s4) 0; }

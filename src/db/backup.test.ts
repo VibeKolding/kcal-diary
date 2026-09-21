@@ -8,6 +8,7 @@ import {
   buildBackup, importBackup, undoRestore, restorePointAt, BackupError,
   backupIsStale, isBackupStale, backupFileName,
 } from '@/features/backup/backup'
+import { birthDateFromAge, calcTargets, targetsForProfile } from '@/domain/targets'
 import type { Food, Profile } from '@/domain/types'
 
 const profile: Profile = {
@@ -73,7 +74,10 @@ describe('резервная копия', () => {
   })
 
   it('переживает круг экспорт → очистка → импорт', async () => {
-    await db.profile.put(profile)
+    // Норма — та, что посчитало бы приложение: авторасчётную импорт сверяет
+    // с формулой, и выдуманные числа в круг не вернулись бы
+    const own = { ...profile, targets: targetsForProfile(profile, 80).targets }
+    await db.profile.put(own)
     const food = await createFood({
       name: 'Мой пирог', category: 'sweet',
       per100: { kcal: 400, protein: 5, fat: 20, carbs: 50 },
@@ -89,7 +93,7 @@ describe('резервная копия', () => {
     const result = await importBackup(asFile(backup))
 
     expect(result.entries).toBe(1)
-    expect(await db.profile.get(1)).toEqual(profile)
+    expect(await db.profile.get(1)).toEqual(own)
 
     const entries = await entriesForDay('2026-09-07')
     expect(entries).toHaveLength(1)
@@ -337,6 +341,42 @@ describe('восстановление не теряет данные', () => {
     const res = await importBackup(asFile(otherBackup({ entries: [e, e, e] })))
     expect(res.entries).toBe(1)
     expect(await db.entries.count()).toBe(1)
+  })
+})
+
+/*
+ * Норма в копии посчитана той версией, что копию сохранила. Копия из
+ * версии без пределов снижения несёт норму с дефицитом, и после переезда
+ * «Сегодня» вело бы по ней до следующего взвешивания.
+ */
+describe('норма из копии', () => {
+  beforeEach(reset)
+
+  // 30 лет, 165 см, 45 кг (ИМТ 16,5), «Снизить вес» по килограмму
+  const old: Profile = {
+    ...profile, sex: 'female', birthDate: birthDateFromAge(30), heightCm: 165,
+    goal: 'lose', ratePerWeek: 1,
+    targets: { kcal: 1180, protein: 90, fat: 40, carbs: 115 },
+  }
+  const file = (p: Profile) => asFile({
+    format: 'kcal-diary-backup', version: 1, exportedAt: '2026-01-01T00:00:00.000Z',
+    profile: [p], foods: [], recipes: [], entries: [], water: [],
+    weights: [{ date: '2026-09-20', kg: 45 }],
+  })
+
+  it('авторасчётную сверяет с формулой сразу после восстановления', async () => {
+    await importBackup(file(old))
+    const saved = await db.profile.get(1)
+    const keep = calcTargets({ ...old, weightKg: 45, goal: 'keep', ratePerWeek: 0 })
+    expect(saved?.targets).toEqual(keep.targets)
+    // Выбор из анкеты остаётся как в копии
+    expect(saved?.goal).toBe('lose')
+    expect(saved?.ratePerWeek).toBe(1)
+  })
+
+  it('ручную оставляет как в копии', async () => {
+    await importBackup(file({ ...old, targetsManual: true }))
+    expect((await db.profile.get(1))?.targets).toEqual(old.targets)
   })
 })
 

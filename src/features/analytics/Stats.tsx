@@ -324,7 +324,11 @@ function ReportCards({ profile, report }: { profile: Profile; report: Report }) 
           </div>
           {forecast && forecast.weeks !== null && forecast.weeks > 0 && profile.targetWeightKg && (
             <p className={`${s.forecast} num`}>
-              До {profile.targetWeightKg} кг {forecast.basis === 'trend' ? 'при таком темпе' : 'по темпу из анкеты'}
+              {/* Темп анкеты мог урезать предел (до 18 лет, 1 % веса) — тогда
+                  срок посчитан уже не «по анкете», и так писать нельзя */}
+              До {profile.targetWeightKg} кг {forecast.basis === 'trend'
+                ? 'при таком темпе'
+                : forecast.limitedBy ? 'по допустимому темпу' : 'по темпу из анкеты'}
               {' — '}{humanWeeks(forecast.weeks)}
             </p>
           )}

@@ -52,6 +52,156 @@ export const GOAL_RATES: Record<Goal, number[]> = {
   gain: [0.125, 0.25, 0.5],
 }
 
+/*
+ * Пределы снижения веса.
+ *
+ * Анкета принимает возраст от 14 лет и любой вес, а цель и темп выбираются
+ * отдельно. Без пределов подросток или человек с недостатком веса мог
+ * выбрать «Снизить вес» по килограмму в неделю и молча получить дефицит.
+ * Пределы касаются только снижения: удержание и набор они не трогают.
+ * Ручную норму не трогают тоже — это осознанный выбор человека, о норме
+ * ниже базового обмена и так предупреждает профиль.
+ */
+
+/** С этого возраста — взрослые темпы. Младше организм ещё растёт, и дефицит мешает росту */
+export const ADULT_AGE = 18
+/** ИМТ ниже этого — недостаток веса, снижать дальше некуда. Ровно 18,5 — уже норма */
+export const UNDERWEIGHT_BMI = 18.5
+/** Потолок снижения до 18 лет, кг в неделю */
+export const TEEN_MAX_LOSS = 0.25
+/**
+ * Потолок снижения для всех — доля массы тела в неделю. Подсказка в анкете
+ * давно обещала «до 1 % массы тела», но ничто этого не требовало: при 50 кг
+ * можно было выбрать килограмм в неделю, то есть 2 %.
+ */
+export const MAX_LOSS_SHARE = 0.01
+
+/**
+ * Запас на погрешность дробей. Граница должна проходить: 0,5 кг при 50 кг
+ * и ИМТ ровно 18,5 допустимы, и 0.5000000000000001 не повод их отсечь.
+ */
+const LIMIT_EPS = 1e-6
+
+/** Индекс массы тела, кг/м² */
+export function bmi(weightKg: number, heightCm: number): number {
+  const h = heightCm / 100
+  return weightKg / (h * h)
+}
+
+/** Что урезало план из анкеты: недостаток веса, возраст или доля массы тела */
+export type PlanLimit = 'underweight' | 'teen' | 'share'
+
+export interface PlanBody {
+  /** Текущий вес; null — неизвестен (ни одного взвешивания), тогда действует только возраст */
+  weightKg: number | null
+  heightCm: number
+  /** Полных лет на сегодня — см. ageFrom */
+  age: number
+}
+
+export interface PlanInput extends PlanBody {
+  goal: Goal
+  /** кг в неделю, как в анкете */
+  ratePerWeek: number
+}
+
+/** План, по которому на самом деле считаются норма и прогноз */
+export interface SafePlan {
+  goal: Goal
+  ratePerWeek: number
+  /** Какой предел урезал план; null — план из анкеты подошёл как есть */
+  limitedBy: PlanLimit | null
+}
+
+/** Потолок темпа снижения и то, чем он задан */
+export interface LossCap {
+  /** кг в неделю */
+  rate: number
+  by: 'teen' | 'share'
+}
+
+/**
+ * Можно ли вообще снижать вес: нет, если ИМТ уже ниже 18,5.
+ * Вес неизвестен — судить не по чему, и снижение не запрещается.
+ */
+export function canLose(weightKg: number | null, heightCm: number): boolean {
+  if (weightKg === null) return true
+  return bmi(weightKg, heightCm) >= UNDERWEIGHT_BMI - LIMIT_EPS
+}
+
+/**
+ * Самый быстрый допустимый темп снижения. null — потолка нет: взрослый,
+ * а вес неизвестен.
+ *
+ * Из двух потолков действует меньший, и назван будет именно он: иначе
+ * экран написал бы «до 0,25 кг», а посчитал 0,24. При равенстве называется
+ * возраст — это объяснение человеку понятнее.
+ */
+export function maxLoss(weightKg: number | null, age: number): LossCap | null {
+  const teen = age < ADULT_AGE ? TEEN_MAX_LOSS : Infinity
+  const share = weightKg === null ? Infinity : weightKg * MAX_LOSS_SHARE
+  if (teen === Infinity && share === Infinity) return null
+  return teen <= share + LIMIT_EPS ? { rate: teen, by: 'teen' } : { rate: share, by: 'share' }
+}
+
+/**
+ * План, по которому считается норма: анкета, приведённая к пределам.
+ *
+ * При недостатке веса снижение превращается в удержание — норма и БЖУ
+ * те же, что у «Удержать вес». Иначе темп урезается до потолка (maxLoss)
+ * как есть, без округления к кнопкам: при 63 кг это 0,63 кг в неделю.
+ * Удержание и набор возвращаются без изменений.
+ *
+ * Сама анкета здесь не переписывается: пока её не сохранили заново,
+ * подросток, которому исполнилось 18, получит выбранный темп обратно без
+ * повторного заполнения. Форма анкеты же сохраняет уже урезанный выбор —
+ * то, что на ней отмечено (limitPick в features/profile/limits.ts).
+ */
+export function safePlan(input: PlanInput): SafePlan {
+  const { goal, ratePerWeek } = input
+  if (goal !== 'lose') return { goal, ratePerWeek, limitedBy: null }
+  if (!canLose(input.weightKg, input.heightCm)) {
+    return { goal: 'keep', ratePerWeek: 0, limitedBy: 'underweight' }
+  }
+  const cap = maxLoss(input.weightKg, input.age)
+  if (cap && ratePerWeek > cap.rate + LIMIT_EPS) {
+    return { goal, ratePerWeek: cap.rate, limitedBy: cap.by }
+  }
+  return { goal, ratePerWeek, limitedBy: null }
+}
+
+export interface LossOption {
+  /** Темп из GOAL_RATES.lose, кг в неделю */
+  rate: number
+  allowed: boolean
+  /** Почему темп недоступен; null — доступен */
+  reason: PlanLimit | null
+}
+
+export interface LossOptions {
+  /** false — ИМТ ниже 18,5: «Снизить вес» не предлагается вовсе */
+  canLose: boolean
+  /** Потолок темпа (см. maxLoss); null — потолка нет */
+  cap: LossCap | null
+  /** Все темпы GOAL_RATES.lose по порядку, с пометкой, какие доступны */
+  options: LossOption[]
+}
+
+/**
+ * Что показать на шаге «цель и темп»: доступно ли снижение и какие темпы.
+ *
+ * Причина у недоступного темпа — та же, что вернул бы safePlan, так что
+ * экран и норма не расходятся. Бывает, что недоступны все темпы (подросток
+ * легче 25 кг): тогда норма считается по cap.rate.
+ */
+export function lossOptions(body: PlanBody): LossOptions {
+  const options = GOAL_RATES.lose.map((rate): LossOption => {
+    const { limitedBy } = safePlan({ ...body, goal: 'lose', ratePerWeek: rate })
+    return { rate, allowed: limitedBy === null, reason: limitedBy }
+  })
+  return { canLose: canLose(body.weightKg, body.heightCm), cap: maxLoss(body.weightKg, body.age), options }
+}
+
 /**
  * Дата рождения из возраста.
  *
@@ -105,6 +255,12 @@ export interface TargetResult {
   tdee: number
   /** Норму подняли до уровня базового обмена — темп цели недостижим безопасно */
   clampedToBmr: boolean
+  /**
+   * План, по которому посчитана норма (safePlan). Отличается от анкеты,
+   * когда сработал предел, — limitedBy говорит какой, чтобы экран мог
+   * объяснить, почему норма не та, что ждали.
+   */
+  plan: SafePlan
 }
 
 /**
@@ -163,17 +319,24 @@ export function splitMacros(
  * Пол ограничен снизу величиной базового обмена: опускаться ниже BMR небезопасно,
  * поэтому в таком случае норма поднимается до BMR и поднимается флаг clampedToBmr.
  *
+ * Цель и темп берутся не из анкеты как есть, а после пределов (safePlan).
+ * Проверка здесь, а не только на экранах: через эту функцию идут и анкета,
+ * и пересчёт после взвешивания, и профили из старых версий и копий — так
+ * пределы действуют везде, в том числе когда вес опустился ниже ИМТ 18,5
+ * уже после анкеты.
+ *
  * БЖУ: см. splitMacros.
  */
 export function calcTargets(input: TargetInput, now = new Date()): TargetResult {
   const age = ageFrom(input.birthDate, now)
   const bmrValue = bmr(input.sex, input.weightKg, input.heightCm, age)
   const tdeeValue = tdee(bmrValue, input.activity)
+  const plan = safePlan({ ...input, age })
 
-  const dailyDelta = (input.ratePerWeek * KCAL_PER_KG) / 7
+  const dailyDelta = (plan.ratePerWeek * KCAL_PER_KG) / 7
   let kcal = tdeeValue
-  if (input.goal === 'lose') kcal = tdeeValue - dailyDelta
-  if (input.goal === 'gain') kcal = tdeeValue + dailyDelta
+  if (plan.goal === 'lose') kcal = tdeeValue - dailyDelta
+  if (plan.goal === 'gain') kcal = tdeeValue + dailyDelta
 
   let clampedToBmr = false
   if (kcal < bmrValue) {
@@ -187,10 +350,13 @@ export function calcTargets(input: TargetInput, now = new Date()): TargetResult 
   if (kcal < bmrValue) kcal = Math.ceil(bmrValue / 10) * 10
 
   return {
-    targets: splitMacros(kcal, input),
+    // БЖУ — по цели плана: при недостатке веса белок «как на дефиците»
+    // не нужен, дефицита ведь нет
+    targets: splitMacros(kcal, { ...input, goal: plan.goal }),
     bmr: Math.round(bmrValue),
     tdee: Math.round(tdeeValue),
     clampedToBmr,
+    plan,
   }
 }
 
