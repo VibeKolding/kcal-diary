@@ -9,7 +9,7 @@
  * в консоли, человеку — объяснение и одно действие.
  */
 
-export type ErrorKind = 'chunk' | 'storage' | 'quota' | 'version' | 'network' | 'other'
+export type ErrorKind = 'chunk' | 'storage' | 'storage-glitch' | 'quota' | 'version' | 'network' | 'other'
 
 export interface ErrorText {
   kind: ErrorKind
@@ -25,14 +25,24 @@ export interface ErrorText {
 const CHUNK = /dynamically imported module|Importing a module script failed|Unable to preload CSS/i
 
 /*
- * Хранилище недоступно. Имена — из Dexie (он оборачивает отказ IndexedDB
- * в свои ошибки) и из самого браузера. InvalidState и Security так
- * выглядят приватные окна старых браузеров и запрет данных сайтов.
+ * Хранилище недоступно вовсе: базы нет, её не дали открыть или запретили.
+ * Имена — из Dexie (он оборачивает отказ IndexedDB в свои ошибки) и из
+ * самого браузера. Так выглядят приватные окна старых браузеров и запрет
+ * данных сайтов — только тут и уместен совет про приватное окно.
  */
 const STORAGE = new Set([
-  'MissingAPIError', 'OpenFailedError', 'DatabaseClosedError', 'InvalidStateError',
-  'SecurityError', 'UnknownError', 'InvalidAccessError', 'NoSuchDatabaseError',
+  'MissingAPIError', 'OpenFailedError', 'SecurityError', 'InvalidAccessError', 'NoSuchDatabaseError',
 ])
+
+/*
+ * Хранилище есть, но браузер не выполнил запрос: внутренний сбой
+ * (UnknownError — в Safari так выглядит, например, курсор, который он не
+ * умеет открыть), закрытое или закрывающееся соединение. Раньше это
+ * называлось «браузер не даёт хранить данные» с советом про приватное
+ * окно — у человека в обычном Safari с уже сохранённой анкетой. Записи при
+ * таком сбое целы, и сказать нужно именно это.
+ */
+const GLITCH = new Set(['UnknownError', 'DatabaseClosedError', 'InvalidStateError'])
 
 const NETWORK = /Failed to fetch|NetworkError|Load failed|network connection|Internet connection/i
 
@@ -122,6 +132,22 @@ export function describeError(e: unknown): ErrorText {
       title: 'Нужна свежая версия приложения',
       text: 'Дневник на этом устройстве сохранён более новой версией приложения, '
         + 'а открылась старая. Перезагрузите страницу — подтянется свежая.',
+    }
+  }
+  // Запрет узнаётся по имени, а не по отдельному сбою: приватное окно
+  // старого Firefox — это InvalidStateError при открытии базы
+  const blocked = n.includes('MissingAPIError') || n.includes('SecurityError')
+    || (n[0] === 'OpenFailedError' && n.includes('InvalidStateError'))
+  // Всё прочее с UnknownError — сбой, а не запрет. И OpenFailedError с ним
+  // внутри тоже: Safari иногда не открывает базу с «internal error» и
+  // открывает после перезагрузки
+  if (!blocked && n.some((name) => GLITCH.has(name))) {
+    return {
+      kind: 'storage-glitch',
+      title: 'Браузер не смог прочитать дневник',
+      text: 'Это сбой хранилища браузера, а не ваших записей: они на месте. '
+        + 'Перезагрузите страницу. Если ошибка повторяется, сделайте снимок этого '
+        + 'экрана — по строке внизу разработчик найдёт причину.',
     }
   }
   if (n.some((name) => STORAGE.has(name))) {

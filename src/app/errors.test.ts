@@ -32,8 +32,27 @@ describe('describeError', () => {
   })
 
   it('отказ браузера в приватном окне — это тоже хранилище', () => {
-    expect(describeError(dexie('InvalidStateError')).kind).toBe('storage')
+    expect(describeError(dexie('OpenFailedError', 'x', dexie('InvalidStateError'))).kind).toBe('storage')
     expect(describeError(new DOMException('denied', 'SecurityError')).kind).toBe('storage')
+    expect(describeError(dexie('OpenFailedError', 'x', new DOMException('denied', 'SecurityError'))).kind).toBe('storage')
+  })
+
+  /*
+   * Снимок с iPhone: обычный Safari, анкета сохранена, а экран говорил
+   * «Браузер не даёт хранить данные» и советовал приватное окно. На деле
+   * Safari не открыл курсор — сбой запроса, записи целы.
+   */
+  it('сбой запроса в открытой базе — не запрет хранилища, и записи целы', () => {
+    const safari = dexie('UnknownError', 'Unable to open cursor UnknownError: Unable to open cursor',
+      new DOMException('Unable to open cursor', 'UnknownError'))
+    const d = describeError(safari)
+    expect(d.kind).toBe('storage-glitch')
+    expect(d.text).not.toMatch(/приватн/)
+    expect(d.text).toMatch(/на месте/)
+    expect(describeError(dexie('DatabaseClosedError')).kind).toBe('storage-glitch')
+    expect(describeError(dexie('InvalidStateError')).kind).toBe('storage-glitch')
+    expect(describeError(dexie('OpenFailedError', 'internal error', new DOMException('x', 'UnknownError'))).kind)
+      .toBe('storage-glitch')
   })
 
   it('смотрит внутрь OpenFailedError: нехватка места — отдельный совет', () => {

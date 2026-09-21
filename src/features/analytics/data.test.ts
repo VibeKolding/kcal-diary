@@ -6,7 +6,8 @@ import { dayKey, parseDay, shiftDay } from '@/domain/dates'
 import { db } from '@/db/db'
 import { addQuickEntry } from '@/db/entries'
 import {
-  averageMacros, buildReport, diaryStart, diaryStreaks, missedDays, periodTotals, type DayPoint,
+  averageMacros, buildReport, buildStreaks, diaryStart, diaryStreaks, loggedDates, missedDays, periodTotals,
+  type DayPoint,
 } from './data'
 
 function entry(over: Partial<Entry>): Entry {
@@ -121,6 +122,49 @@ describe('серии дневника', () => {
     expect(diaryStreaks(run('2026-09-18', 3), today).current).toBe(3)
     expect(diaryStreaks(run('2026-09-15', 5), today).current).toBe(0)
     expect(diaryStreaks([], today)).toEqual({ current: 0, best: 0 })
+  })
+})
+
+/*
+ * Safari на iPhone не открывает курсор с направлением nextunique/prevunique:
+ * «UnknownError: Unable to open cursor», на пустом хранилище всегда. Так и
+ * падала «Сегодня» сразу после анкеты. Здесь такой курсор ломается так же,
+ * как в Safari, — и даты с сериями обязаны считаться без него.
+ */
+describe('даты с записями без уникального курсора (как в Safari)', () => {
+  const originals: Array<[object, string, unknown]> = []
+  beforeEach(async () => {
+    await db.entries.clear()
+    for (const proto of [IDBIndex.prototype, IDBObjectStore.prototype]) {
+      for (const method of ['openCursor', 'openKeyCursor'] as const) {
+        const orig = (proto as unknown as Record<string, (...a: unknown[]) => unknown>)[method]!
+        originals.push([proto, method, orig])
+        ;(proto as unknown as Record<string, unknown>)[method] = function (this: unknown, ...a: unknown[]) {
+          if (a[1] === 'nextunique' || a[1] === 'prevunique') {
+            throw new DOMException('Unable to open cursor', 'UnknownError')
+          }
+          return orig.apply(this, a)
+        }
+      }
+    }
+    return () => {
+      for (const [proto, method, orig] of originals.splice(0)) (proto as Record<string, unknown>)[method] = orig
+    }
+  })
+
+  it('пустой дневник: ни одной даты и нулевая серия, а не ошибка', async () => {
+    expect(await loggedDates()).toEqual([])
+    expect(await buildStreaks('2026-09-21')).toEqual({ current: 0, best: 0 })
+  })
+
+  it('несколько записей в день дают одну дату, по возрастанию', async () => {
+    await db.entries.bulkAdd([
+      entry({ id: 'a', date: '2026-09-20' }), entry({ id: 'b', date: '2026-09-18' }),
+      entry({ id: 'c', date: '2026-09-20' }), entry({ id: 'd', date: '2026-09-19' }),
+      entry({ id: 'e', date: '2026-09-19' }),
+    ])
+    expect(await loggedDates()).toEqual(['2026-09-18', '2026-09-19', '2026-09-20'])
+    expect(await buildStreaks('2026-09-21')).toEqual({ current: 3, best: 3 })
   })
 })
 

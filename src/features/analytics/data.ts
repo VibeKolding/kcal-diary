@@ -213,9 +213,19 @@ export function diaryStreaks(dates: string[], today: string = dayKey()): Streaks
   return { current: currentStreak(stats, today), best: bestStreak(stats) }
 }
 
-/** Все даты, где есть хоть одна запись, по возрастанию. Читается только индекс */
+/**
+ * Все даты, где есть хоть одна запись, по возрастанию. Читается только индекс.
+ *
+ * Не uniqueKeys(): он открывает курсор с направлением nextunique, а Safari
+ * на iPhone такой курсор не открывает — «UnknownError: Unable to open
+ * cursor», на пустом дневнике всегда (Dexie #1052, idb #71). Сразу после
+ * анкеты записей ещё нет, и «Сегодня» падало первым же экраном: серия на
+ * главной считается отсюда. Обычный курсор по тому же индексу Safari
+ * открывает, а повторы идут подряд — индекс отсортирован.
+ */
 export async function loggedDates(): Promise<string[]> {
-  return (await db.entries.orderBy('date').uniqueKeys()) as string[]
+  const dates = (await db.entries.orderBy('date').keys()) as string[]
+  return dates.filter((d, i) => i === 0 || d !== dates[i - 1])
 }
 
 /** Серии дневника за всю историю — для отчётов и сводки на главной */
