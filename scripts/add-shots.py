@@ -26,7 +26,7 @@ import sys
 import unicodedata
 from io import BytesIO
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CATALOGUE = os.path.join(ROOT, 'src', 'features', 'gym', 'exercises.ts')
@@ -90,17 +90,22 @@ def identify(name, cat):
     if not words:
         return None, 'в имени нет названия упражнения'
 
-    scored = sorted(
-        ((len(words & stems(title)) / len(words), eid, audience) for eid, title, audience in cat),
-        reverse=True,
-    )
-    best, runner = scored[0], scored[1]
-    if best[0] < 0.8:
+    # Две доли: сколько слов имени нашлось в названии и сколько названия
+    # покрыто именем. Одной первой мало: «Подтягивания» целиком входят и в
+    # «Подтягивания», и в «Подтягивания обратным хватом», а различает их
+    # только вторая.
+    def score(title):
+        common = len(words & stems(title))
+        return common / len(words), common / len(stems(title))
+
+    scored = sorted(((score(title), eid, audience) for eid, title, audience in cat), reverse=True)
+    (fwd, back), eid, audience = scored[0]
+    (fwd2, back2), _, _ = scored[1]
+    if fwd < 0.8:
         return None, 'название не узнано'
-    if best[0] - runner[0] < 0.2:
+    if fwd - fwd2 < 0.2 and back - back2 < 0.2:
         return None, 'название подходит сразу к двум упражнениям'
 
-    eid, audience = best[1], best[2]
     if audience != 'both':
         if sex and sex != audience:
             return None, 'упражнение показано только другому полу'
@@ -135,6 +140,23 @@ def seam(img):
     return left + (best - 1) / 2, best
 
 
+def grid_seam(img):
+    """Насколько резок самый сильный поперечный стык в средней трети кадра:
+    доля столбцов со скачком на этой строке минус та же доля на соседних."""
+    grey = img.convert('L')
+    w, h = grey.size
+    px = grey.load()
+    xs = range(0, w, 2)
+
+    def cover(y):
+        return sum(1 for x in xs if abs(px[x, y] - px[x, y + 1]) >= 12) / len(xs)
+
+    lo, hi = int(h * 0.35), int(h * 0.65)
+    cov = {y: cover(y) for y in range(lo - 2, hi + 2)}
+    y = max(range(lo, hi), key=cov.get)
+    return cov[y] - max(cov[y - 2], cov[y - 1], cov[y + 1], cov[y + 2])
+
+
 def complaints(img):
     """Всё, из-за чего снимок не стоит класть в папку как есть."""
     out = []
@@ -147,14 +169,14 @@ def complaints(img):
     elif abs(centre - w / 2) > SEAM_TOLERANCE:
         out.append('шов увёл на %+.0f px от середины' % (centre - w / 2))
 
-    # Резкий стык поперёк кадра бывает и у сетки 2x2, и у обычной линии пола,
-    # поэтому это предупреждение, а не отказ: такой файл смотрят глазами.
-    grey = img.convert('L')
-    rows = ImageChops.difference(grey.crop((0, 0, w, h - 1)), grey.crop((0, 1, w, h)))
-    profile = list(rows.resize((1, h - 1), Image.BOX).getdata())
-    middle = profile[int(h * 0.35):int(h * 0.65)]
-    if max(middle) >= 20 and max(middle) > 8 * max(sorted(profile)[len(profile) // 2], 1):
-        out.append('! поперёк кадра резкий стык — проверьте, не сетка ли это 2x2')
+    # Сетка 2x2 вместо диптиха: генератор так иногда поступает с лежачими
+    # упражнениями, которым тесно в высокой панели. Шов между рядами — это
+    # стык двух разных картинок, поэтому он резкий в одну строку и идёт
+    # почти через всю ширину. Край настоящего предмета — брусьев, пола,
+    # скамьи — размыт на несколько строк, и соседние строки тоже дают
+    # скачок. На первой партии: сетка 0.97, самый резкий честный кадр 0.07.
+    if grid_seam(img) > 0.5:
+        out.append('это сетка 2x2, а не две панели: нужен новый кадр')
     return out
 
 
@@ -201,16 +223,14 @@ def main(argv):
             continue
         img = Image.open(os.path.join(folder, name))
         bad = complaints(img)
-        blocking = [b for b in bad if not b.startswith('!')]
-        if blocking:
+        if bad:
             skipped.append((name, '; '.join(bad)))
             continue
         data, q = convert(img.convert('RGB'))
         taken[target] = name
         if not dry:
             open(os.path.join(OUT_DIR, target + '.webp'), 'wb').write(data)
-        note = ' '.join(b for b in bad if b.startswith('!'))
-        print('%-34s %-30s %5.1f КБ  q%d %s' % (target, name[:30], len(data) / 1024, q, note))
+        print('%-34s %-30s %5.1f КБ  q%d' % (target, name[:30], len(data) / 1024, q))
 
     for name, why in skipped:
         print('пропущен: %-40s %s' % (name[:40], why))
