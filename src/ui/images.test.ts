@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MUSCLE_GROUPS, groupArt, groupPhoto, pickExercises } from '@/domain/gym'
 import { EXERCISES } from '@/features/gym/exercises'
+import { SHOTS } from '@/features/gym/shots'
 import type { Sex } from '@/domain/types'
 
 const ROOT = 'public/images'
-const SHOTS = 'public/images/gym/ex'
+const SHOT_DIR = 'public/images/gym/ex'
 const SEXES: Sex[] = ['female', 'male']
 
 function walk(dir: string): string[] {
@@ -66,7 +67,7 @@ function webpSize(file: string): [number, number] {
 }
 
 describe('снимки упражнений', () => {
-  const laid = readdirSync(SHOTS).filter((f) => /\.(webp|png|jpe?g)$/i.test(f))
+  const laid = readdirSync(SHOT_DIR).filter((f) => /\.(webp|png|jpe?g)$/i.test(f))
 
   /*
    * Имя файла — единственная связь снимка с упражнением, и промах в нём
@@ -83,13 +84,23 @@ describe('снимки упражнений', () => {
   })
 
   /*
-   * Стрелка направления привязана к середине рамки, а не к шву на самой
-   * картинке. Кадр другой пропорции object-fit обрежет по краям — и шов
-   * уедет от стрелки ровно на половину разницы.
+   * Рамка снимка в приложении — 3:2. Кадр другой пропорции object-fit
+   * обрежет по краям, и крайняя поза одной из половин уйдёт за рамку.
    */
   it('кадр везде 1200 × 800', () => {
     for (const f of laid) {
-      expect(webpSize(join(SHOTS, f)), f).toEqual([1200, 800])
+      expect(webpSize(join(SHOT_DIR, f)), f).toEqual([1200, 800])
     }
+  })
+
+  /*
+   * Приложение показывает только упражнения из списка SHOTS, а список
+   * пишет скрипт раскладки. Файл, положенный в папку руками, без списка
+   * не появился бы нигде; строка списка без файла дала бы упражнение с
+   * пустой рамкой. Лечится одной командой: python3 scripts/add-shots.py --sync
+   */
+  it('список снимков в приложении совпадает с папкой', () => {
+    const inFolder = laid.filter((f) => f.endsWith('.webp')).map((f) => f.slice(0, -5)).sort()
+    expect([...SHOTS].sort()).toEqual(inFolder)
   })
 })

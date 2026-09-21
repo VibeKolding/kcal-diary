@@ -5,12 +5,14 @@ import { Sheet } from '@/ui/Sheet'
 import { MuscleArt } from '@/ui/MuscleArt'
 import { Icon } from '@/ui/Icon'
 import {
-  ARROW_VIEWBOX, GROUP_TITLE, MUSCLE_GROUPS, SEX_TITLE, arrowPath, exercisePhoto,
-  exerciseSex, groupArt, groupPhoto, pickExercises,
-  type Exercise, type Motion, type MuscleGroup,
+  GROUP_TITLE, MUSCLE_GROUPS, SEX_TITLE, exercisePhoto, exerciseSex, groupArt,
+  groupPhoto, pickExercises, withShots,
+  type Exercise, type MuscleGroup,
 } from '@/domain/gym'
+import { plural } from '@/domain/dates'
 import type { Profile, Sex } from '@/domain/types'
 import { EXERCISES } from './exercises'
+import { SHOTS } from './shots'
 import { WorkoutLog } from './WorkoutLog'
 import { StarButton } from '@/ui/StarButton'
 import { favoriteIds } from '@/db/workouts'
@@ -19,6 +21,9 @@ import s from './Gym.module.css'
 
 const GROUP_IDS = new Set<string>(MUSCLE_GROUPS.map((g) => g.id))
 const SEXES: Sex[] = ['female', 'male']
+
+/** Что раздел показывает: только упражнения, для которых есть снимок */
+const CATALOG = withShots(EXERCISES, SHOTS)
 
 /**
  * Раздел «Зал»: группа мышц → пол → упражнения.
@@ -43,7 +48,7 @@ export function Gym({ profile }: { profile: Profile }) {
 function GroupsScreen({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
   const favIds = useLiveQuery(() => favoriteIds('exercise'), []) ?? []
-  const favs = favIds.map((id) => EXERCISES.find((e) => e.id === id)).filter((e): e is Exercise => !!e)
+  const favs = favIds.map((id) => CATALOG.find((e) => e.id === id)).filter((e): e is Exercise => !!e)
 
   return (
     <div className={s.screen}>
@@ -185,7 +190,7 @@ function ExercisesScreen() {
   const valid = group && GROUP_IDS.has(group) && (sex === 'male' || sex === 'female')
   // Избранные поднимаются наверх, остальной порядок — как в справочнике
   const list = useMemo(() => {
-    const rows = valid ? pickExercises(EXERCISES, group as MuscleGroup, sex as Sex) : []
+    const rows = valid ? pickExercises(CATALOG, group as MuscleGroup, sex as Sex) : []
     const fav = new Set(favIds)
     return [...rows.filter((e) => fav.has(e.id)), ...rows.filter((e) => !fav.has(e.id))]
   }, [valid, group, sex, favIds])
@@ -209,7 +214,9 @@ function ExercisesScreen() {
 
       <div className={s.head}>
         <h1 className={s.title}>{GROUP_TITLE[g]}</h1>
-        <p className={s.hint}>{SEX_TITLE[x]} · {list.length} упражнений</p>
+        <p className={s.hint}>
+          {SEX_TITLE[x]} · {list.length} {plural(list.length, 'упражнение', 'упражнения', 'упражнений')}
+        </p>
       </div>
 
       <div className={s.list}>
@@ -253,33 +260,27 @@ function ExercisesScreen() {
 }
 
 /**
- * Снимок упражнения над описанием: диптих из двух фаз движения со стрелкой
- * направления поверх. Пока файла нет, блок просто не появляется — пустая
- * рамка хуже, чем её отсутствие.
- *
- * Стрелка ждёт загрузки картинки. Иначе она повисла бы над серой заглушкой
- * и показывала направление движения на пустом месте.
+ * Снимок упражнения над описанием: диптих из двух фаз движения. Раздел
+ * показывает только упражнения со снимком, но файл всё равно может не
+ * загрузиться — например, без сети, пока его нет в кэше. Тогда блок просто
+ * не появляется: пустая рамка хуже, чем её отсутствие.
  */
-function ExerciseShot({ id, sex, motion }: { id: string; sex: Sex; motion: Motion }) {
-  const [state, setState] = useState<'wait' | 'shown' | 'gone'>('wait')
+function ExerciseShot({ id, sex }: { id: string; sex: Sex }) {
+  const [gone, setGone] = useState(false)
   const img = useRef<HTMLImageElement>(null)
 
   /*
-   * Снимок из кэша бывает готов раньше, чем React успевает повесить onLoad,
-   * и событие тогда не приходит вовсе. Проявляется это подло: при первом
-   * открытии карточки стрелка есть, при втором пропадает, и только на
-   * устройстве с прогретым кэшем. Поэтому состояние спрашивается у самой
-   * картинки. naturalWidth === 0 при complete означает, что файла нет.
+   * Ошибка загрузки бывает раньше, чем React успевает повесить onError, и
+   * тогда событие не приходит вовсе. Поэтому после монтирования состояние
+   * спрашивается у самой картинки: naturalWidth === 0 при complete значит,
+   * что файл не пришёл.
    */
   useEffect(() => {
     const el = img.current
-    if (!el?.complete) return
-    setState(el.naturalWidth > 0 ? 'shown' : 'gone')
+    if (el?.complete && el.naturalWidth === 0) setGone(true)
   }, [])
 
-  if (state === 'gone') return null
-  const d = arrowPath(motion)
-
+  if (gone) return null
   return (
     <div className={s.shot} aria-hidden="true">
       <img
@@ -292,18 +293,8 @@ function ExerciseShot({ id, sex, motion }: { id: string; sex: Sex; motion: Motio
            откладывается до конца анимации. Картинка ровно одна и она на
            экране — откладывать нечего. */
         decoding="async"
-        onLoad={() => setState('shown')}
-        onError={() => setState('gone')}
+        onError={() => setGone(true)}
       />
-      {state === 'shown' && (
-        <svg className={s.arrow} viewBox={ARROW_VIEWBOX}>
-          {/* Тень — второй путь тем же контуром, а не filter: drop-shadow:
-              filter над backdrop-filter создаёт новую поверхность отрисовки,
-              и стекло от этого мерцало. */}
-          <path className={s.arrowEdge} d={d} />
-          <path className={s.arrowLine} d={d} />
-        </svg>
-      )}
     </div>
   )
 }
@@ -312,12 +303,9 @@ function Detail({ exercise, sex }: { exercise: Exercise; sex: Sex }) {
   return (
     <div className={s.detail}>
       {/* key не косметика: без него React переиспользовал бы состояние
-          загрузки при подмене упражнения в открытой шторке, и стрелка
-          оказалась бы над чужой картинкой. */}
-      <ExerciseShot
-        key={`${exercise.id}-${sex}`}
-        id={exercise.id} sex={sex} motion={exercise.motion}
-      />
+          загрузки при подмене упражнения в открытой шторке, и неудача
+          прежней картинки спрятала бы новую. */}
+      <ExerciseShot key={`${exercise.id}-${sex}`} id={exercise.id} sex={sex} />
 
       <div className={s.facts}>
         <Fact label="Подходы" value={exercise.sets[sex]} />

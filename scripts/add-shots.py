@@ -8,6 +8,7 @@
 
     python3 scripts/add-shots.py "~/Downloads/Упражнения в приложение"
     python3 scripts/add-shots.py <папка> --dry   # только разбор, без записи
+    python3 scripts/add-shots.py --sync          # только пересобрать список
 
 Имя файла достаточно человеческое: «Жим штанги лёжа, для женщин.jpg»,
 «гантели на наклонной муж.jpg» или прямо «chest-incline-db-male.jpg».
@@ -16,9 +17,14 @@
 а у адресного упражнения — из его audience, поэтому «Отжимания с колен.jpg»
 раскладывается без уточнений.
 
-Что проверяется до записи: пропорция кадра, положение шва между панелями и
-вес готового файла. Шов — главное: стрелку направления рисует приложение и
-привязывает ровно к середине кадра, поэтому уехавший шов виден сразу.
+Что проверяется до записи: пропорция кадра, что это две панели в ряд, а не
+сетка, что шов между ними посередине, и вес готового файла.
+
+После записи пересобирается src/features/gym/shots.ts — список снимков,
+которые лежат в папке. Приложение показывает только упражнения из этого
+списка, поэтому новое фото само возвращает упражнение в раздел. Если файл
+положили в папку руками, список пересобирает --sync; забыть нельзя —
+npm test сверяет список с папкой.
 """
 import os
 import re
@@ -35,7 +41,8 @@ OUT_DIR = os.path.join(ROOT, 'public', 'images', 'gym', 'ex')
 WIDTH, HEIGHT = 1200, 800
 BUDGET = 90 * 1024          # вес одного файла, байт
 QUALITIES = (82, 78, 74, 70)
-SEAM_TOLERANCE = 4          # допуск на смещение шва, пикселей исходника
+SEAM_TOLERANCE = 0.02       # допуск на смещение шва, доля ширины кадра
+SHOTS_TS = os.path.join(ROOT, 'src', 'features', 'gym', 'shots.ts')
 
 
 def nfc(text):
@@ -169,7 +176,7 @@ def complaints(img):
     centre, band = seam(img)
     if centre is None:
         out.append('между панелями нет сплошной полосы: это диптих?')
-    elif abs(centre - w / 2) > SEAM_TOLERANCE:
+    elif abs(centre - w / 2) > SEAM_TOLERANCE * w:
         out.append('шов увёл на %+.0f px от середины' % (centre - w / 2))
 
     # Сетка 2x2 вместо диптиха: генератор так иногда поступает с лежачими
@@ -184,8 +191,8 @@ def complaints(img):
 
 
 def convert(img):
-    """1200x800 webp в рамках бюджета. Обрезка только по высоте: любой сдвиг
-    по горизонтали увёл бы шов от середины, а стрелка привязана к ней."""
+    """1200x800 webp в рамках бюджета. Обрезка только по высоте: сдвиг по
+    горизонтали сделал бы одну половину уже другой."""
     w, h = img.size
     keep = int(round(w / 1.5))
     if keep < h:
@@ -201,10 +208,26 @@ def convert(img):
     return None, None
 
 
+def write_list():
+    """Список снимков для приложения — по тому, что лежит в папке, а не по
+    тому, что записано этим прогоном: так в нём оказываются и файлы,
+    положенные руками."""
+    names = sorted(f[:-5] for f in os.listdir(OUT_DIR) if f.endswith('.webp'))
+    body = ''.join("  '%s',\n" % n for n in names)
+    open(SHOTS_TS, 'w', encoding='utf-8').write(
+        '// Создаётся scripts/add-shots.py по содержимому public/images/gym/ex.\n'
+        '// Руками не править: npm test сверяет этот список с папкой.\n'
+        'export const SHOTS: ReadonlySet<string> = new Set([\n' + body + '])\n')
+    return len(names)
+
+
 def main(argv):
     if not argv:
         print(__doc__)
         return 1
+    if argv[0] == '--sync':
+        print('в списке снимков: %d' % write_list())
+        return 0
     folder = os.path.expanduser(argv[0])
     dry = '--dry' in argv
     cat = catalogue()
@@ -238,6 +261,8 @@ def main(argv):
     for name, why in skipped:
         print('пропущен: %-40s %s' % (name[:40], why))
     print('\nразложено %d, пропущено %d%s' % (len(taken), len(skipped), ' (пробный прогон)' if dry else ''))
+    if not dry:
+        print('в списке снимков: %d' % write_list())
     return 0
 
 

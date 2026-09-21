@@ -14,15 +14,6 @@ export type MuscleGroup =
  */
 export type Audience = 'both' | Sex
 
-/**
- * Куда идёт движение от левого кадра снимка-диптиха к правому.
- *
- * Значений четыре, а не три: у «поперёк» нет знака. В тяге каната руки идут
- * к лицу, в жиме ногами платформа уходит от тела — это движения в разные
- * стороны, и одна общая стрелка показала бы одно из них наоборот.
- */
-export type Motion = 'up' | 'down' | 'left' | 'right'
-
 export interface Exercise {
   id: string
   group: MuscleGroup
@@ -41,17 +32,6 @@ export interface Exercise {
    */
   sets: Record<Sex, string>
   rest: string
-  /**
-   * Направление движения на снимке-диптихе: стрелку рисует приложение,
-   * а не генератор картинок.
-   *
-   * Одно значение на упражнение, а не на снимок: снимков 69, по одному на
-   * пару «упражнение × пол», но мужчина и женщина делают одно движение в
-   * одну сторону. Кардинальность и показывает, чей это факт — упражнения,
-   * а не кадра. Поэтому поле здесь, а не таблицей рядом с путём к файлу:
-   * путь из `id` выводится, направление — нет.
-   */
-  motion: Motion
   steps: string[]
   mistakes: string[]
 }
@@ -102,67 +82,11 @@ export function groupArt(group: MuscleGroup): string {
  * из двух, и второй никогда не запрашивается — `pickExercises` не покажет
  * это упражнение чужому полу.
  *
- * Файла может не быть — это нормальное состояние: фотографии добавляются
- * отдельно от кода, и панель просто обходится без картинки, а не
- * показывает битую.
+ * Какие файлы есть на самом деле, знает `SHOTS` в разделе «Зал»: без
+ * снимка упражнение в списке не показывается вовсе (см. `withShots`).
  */
 export function exercisePhoto(id: string, sex: Sex): string {
   return `/images/gym/ex/${id}-${sex}.webp`
-}
-
-/**
- * Система координат стрелки направления.
- *
- * 300×200 — та же пропорция 3:2, что у кадра, поэтому единица по обеим осям
- * одинакова и стрелка «вниз» выходит той же длины, что «вправо». Шов между
- * панелями диптиха приходится ровно на x = 150.
- *
- * `preserveAspectRatio` намеренно не задан: значение по умолчанию совмещает
- * центр этой системы с центром рамки, то есть x = 150 остаётся на середине
- * ширины, даже если пропорцию рамки однажды поменяют.
- */
-export const ARROW_VIEWBOX = '0 0 300 200'
-
-/** Середина кадра — она же шов диптиха */
-const MID_X = 150
-const MID_Y = 100
-/**
- * Половина длины стрелки: 32 единицы, то есть стрелка занимает треть высоты
- * кадра. Первая версия была в полтора раза длиннее и толще — на снимке она
- * читалась не указателем, а главным предметом кадра.
- */
-const REACH = 32
-/** Полуразмах наконечника и его глубина. Наконечник заходит внутрь каждой
-    панели примерно на десятую часть её ширины — это и есть та полоса у шва,
-    которую промт просит держать пустой. */
-const WING = 13
-const DEPTH = 14
-
-/**
- * Путь стрелки: древко и наконечник двумя подпутями одной строки.
- *
- * Всё в долях кадра, ни одного пикселя: снимок бывает от 272 CSS-пикселей
- * шириной на узком телефоне до 520 на десктопе, и стрелка обязана выглядеть
- * одинаково везде. Наконечник — шеврон из двух отрезков, а не залитый
- * треугольник: это язык `Icon`, и заодно снимается вопрос, как положить
- * тень под заливку без запрещённого здесь `filter`.
- */
-export function arrowPath(motion: Motion): string {
-  const near = REACH - DEPTH
-  switch (motion) {
-    case 'down':
-      return `M ${MID_X} ${MID_Y - REACH} V ${MID_Y + REACH}`
-        + ` M ${MID_X - WING} ${MID_Y + near} L ${MID_X} ${MID_Y + REACH} L ${MID_X + WING} ${MID_Y + near}`
-    case 'up':
-      return `M ${MID_X} ${MID_Y + REACH} V ${MID_Y - REACH}`
-        + ` M ${MID_X - WING} ${MID_Y - near} L ${MID_X} ${MID_Y - REACH} L ${MID_X + WING} ${MID_Y - near}`
-    case 'right':
-      return `M ${MID_X - REACH} ${MID_Y} H ${MID_X + REACH}`
-        + ` M ${MID_X + near} ${MID_Y - WING} L ${MID_X + REACH} ${MID_Y} L ${MID_X + near} ${MID_Y + WING}`
-    case 'left':
-      return `M ${MID_X + REACH} ${MID_Y} H ${MID_X - REACH}`
-        + ` M ${MID_X - near} ${MID_Y - WING} L ${MID_X - REACH} ${MID_Y} L ${MID_X - near} ${MID_Y + WING}`
-  }
 }
 
 /** Упражнения группы для выбранного пола: общие плюс адресные */
@@ -183,4 +107,27 @@ export function pickExercises(all: Exercise[], group: MuscleGroup, sex: Sex): Ex
  */
 export function exerciseSex(exercise: Pick<Exercise, 'audience'>, preferred: Sex): Sex {
   return exercise.audience === 'both' ? preferred : exercise.audience
+}
+
+/**
+ * Справочник, урезанный до упражнений, для которых есть снимок.
+ *
+ * Упражнение без фотографии в списке не показывается совсем: карточка без
+ * снимка среди карточек со снимками читается как недоделка. Описания при
+ * этом не удаляются — упражнение возвращается само, как только появится
+ * его файл. Общее упражнение, снятое только для одного пола, остаётся в
+ * списке этого пола и сужает `audience` до него: иначе `exerciseSex` повёл
+ * бы из «Избранного» в список, где упражнения нет.
+ *
+ * `shots` — имена файлов без расширения: `<id>-<пол>`.
+ */
+export function withShots(all: Exercise[], shots: ReadonlySet<string>): Exercise[] {
+  return all.flatMap((e) => {
+    const sexes = (e.audience === 'both' ? (['female', 'male'] as Sex[]) : [e.audience])
+      .filter((sex) => shots.has(`${e.id}-${sex}`))
+    const [first, second] = sexes
+    if (!first) return []
+    const audience: Audience = second ? 'both' : first
+    return [{ ...e, audience }]
+  })
 }

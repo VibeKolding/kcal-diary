@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  MUSCLE_GROUPS, arrowPath, exercisePhoto, exerciseSex, groupPhoto, pickExercises,
-  type Motion, type MuscleGroup,
+  MUSCLE_GROUPS, exercisePhoto, exerciseSex, groupPhoto, pickExercises, withShots,
+  type Exercise, type MuscleGroup,
 } from '@/domain/gym'
 import type { Sex } from '@/domain/types'
 import { EXERCISES } from './exercises'
+import { SHOTS } from './shots'
 
 const SEXES: Sex[] = ['female', 'male']
 const GROUPS = MUSCLE_GROUPS.map((g) => g.id)
@@ -125,67 +126,70 @@ describe('справочник упражнений', () => {
 })
 
 /*
- * Стрелка направления рисуется приложением поверх снимка, а не входит в
- * картинку. Значит её обещания — направление и привязка к шву диптиха —
- * проверяются здесь, а не глазами: компонент протестировать нечем, тесты
- * идут в окружении node.
+ * Раздел показывает не весь справочник, а только то, для чего есть снимок.
+ * Компонент протестировать нечем — тесты идут в окружении node, — поэтому
+ * всё, что обещает фильтр, проверяется на нём самом.
  */
-describe('стрелка направления движения', () => {
-  const ALL: Motion[] = ['up', 'down', 'left', 'right']
+describe('упражнения без снимка не показываются', () => {
+  const SHOWN = withShots(EXERCISES, SHOTS)
+  const ex = (audience: Exercise['audience']): Exercise => ({
+    ...EXERCISES[0]!, id: 'probe', audience,
+  })
 
-  /** Все координаты пути: из «M x y», «L x y», «H x», «V y» */
-  function coords(d: string): { xs: number[]; ys: number[] } {
-    const xs: number[] = []
-    const ys: number[] = []
-    for (const m of d.matchAll(/([MLHV]) (\d+)(?: (\d+))?/g)) {
-      if (m[1] === 'H') xs.push(Number(m[2]))
-      else if (m[1] === 'V') ys.push(Number(m[2]))
-      else { xs.push(Number(m[2])); ys.push(Number(m[3])) }
+  it('общее упражнение со снимком для одного пола остаётся только у него', () => {
+    expect(withShots([ex('both')], new Set(['probe-male']))[0]?.audience).toBe('male')
+    expect(withShots([ex('both')], new Set(['probe-female']))[0]?.audience).toBe('female')
+    expect(withShots([ex('both')], new Set(['probe-male', 'probe-female']))[0]?.audience).toBe('both')
+  })
+
+  it('упражнение без единого снимка пропадает целиком', () => {
+    expect(withShots([ex('both')], new Set())).toEqual([])
+    expect(withShots([ex('female')], new Set(['probe-male']))).toEqual([])
+  })
+
+  it('в показанном списке у каждого упражнения есть свой файл', () => {
+    for (const group of GROUPS) {
+      for (const sex of SEXES) {
+        for (const e of pickExercises(SHOWN, group, sex)) {
+          expect(SHOTS.has(`${e.id}-${sex}`), `${e.id} / ${sex}`).toBe(true)
+        }
+      }
     }
-    return { xs, ys }
-  }
-
-  it('у каждого упражнения указано направление движения', () => {
-    const known = new Set<string>(ALL)
-    for (const e of EXERCISES) expect(known.has(e.motion), e.id).toBe(true)
   })
 
   /*
-   * Списать направление у соседа при заполнении сорока одного объекта —
-   * самая лёгкая из возможных ошибок, а одинаковая стрелка на всём разделе
-   * выглядит как работающая функция.
+   * Прячется только то, что без снимка: всё, что снято, обязано дойти до
+   * экрана. Иначе фильтр мог бы молча выбросить готовую фотографию.
    */
-  it('направления не выродились в одно', () => {
-    expect(new Set(EXERCISES.map((e) => e.motion)).size).toBeGreaterThanOrEqual(3)
-  })
-
-  it('вертикальная стрелка стоит на шве диптиха', () => {
-    for (const m of ['up', 'down'] as Motion[]) {
-      const { xs } = coords(arrowPath(m))
-      expect(Math.min(...xs), m).toBeLessThan(150)
-      expect(Math.max(...xs), m).toBeGreaterThan(150)
-      expect((Math.min(...xs) + Math.max(...xs)) / 2, m).toBe(150)
+  it('каждый снимок из папки виден в своём списке', () => {
+    for (const shot of SHOTS) {
+      const sex: Sex = shot.endsWith('-female') ? 'female' : 'male'
+      const id = shot.slice(0, -(sex.length + 1))
+      const e = EXERCISES.find((x) => x.id === id)
+      expect(e, shot).toBeDefined()
+      expect(pickExercises(SHOWN, e!.group, sex).map((x) => x.id), shot).toContain(id)
     }
   })
 
-  it('горизонтальная стрелка пересекает шов', () => {
-    for (const m of ['left', 'right'] as Motion[]) {
-      const { xs } = coords(arrowPath(m))
-      expect(Math.min(...xs), m).toBeLessThan(150)
-      expect(Math.max(...xs), m).toBeGreaterThan(150)
+  /* Пустой список — это экран «0 упражнений» за выбором пола */
+  it('в каждой группе у каждого пола есть хотя бы одно упражнение', () => {
+    for (const group of GROUPS) {
+      for (const sex of SEXES) {
+        expect(pickExercises(SHOWN, group, sex).length, `${group}/${sex}`).toBeGreaterThan(0)
+      }
     }
   })
 
-  it('стрелки разных направлений действительно разные', () => {
-    expect(new Set(ALL.map(arrowPath)).size).toBe(4)
-  })
-
-  it('стрелка не вылезает за кадр', () => {
-    for (const m of ALL) {
-      const { xs, ys } = coords(arrowPath(m))
-      expect(Math.min(...xs, ...ys), m).toBeGreaterThanOrEqual(0)
-      expect(Math.max(...xs), m).toBeLessThanOrEqual(300)
-      expect(Math.max(...ys), m).toBeLessThanOrEqual(200)
+  /*
+   * Та же ловушка, что с «Избранным» раньше: звезда могла остаться на
+   * упражнении, которое после фильтра живёт только в списке одного пола.
+   */
+  it('переход из «Избранного» ведёт в список, где упражнение показано', () => {
+    for (const e of SHOWN) {
+      for (const preferred of SEXES) {
+        const list = pickExercises(SHOWN, e.group, exerciseSex(e, preferred))
+        expect(list.map((x) => x.id), `${e.id} / профиль ${preferred}`).toContain(e.id)
+      }
     }
   })
 })
