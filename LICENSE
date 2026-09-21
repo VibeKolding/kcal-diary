@@ -1,0 +1,33 @@
+Дневник калорий
+Copyright (c) 2026 Koldin. Все права защищены.
+
+Исходный код, тексты и изображения этого репозитория опубликованы только
+для ознакомления с тем, как устроено приложение. Публикация не даёт права
+копировать, изменять, распространять их или использовать в других
+проектах без письменного разрешения автора. Просмотр репозитория и
+создание его копии средствами GitHub допускаются в пределах, которые
+предусматривают условия использования GitHub.
+
+ПРИЛОЖЕНИЕ И ИСХОДНЫЙ КОД ПРЕДОСТАВЛЯЮТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО
+ГАРАНТИЙ, ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ ГАРАНТИИ РАБОТОСПОСОБНОСТИ,
+ПРИГОДНОСТИ ДЛЯ КОНКРЕТНОЙ ЦЕЛИ И ОТСУТСТВИЯ ОШИБОК. АВТОР НЕ НЕСЁТ
+ОТВЕТСТВЕННОСТИ ЗА ЛЮБОЙ УЩЕРБ, ВКЛЮЧАЯ ПОТЕРЮ ДАННЫХ, ВОЗНИКШИЙ ИЗ-ЗА
+ИСПОЛЬЗОВАНИЯ ПРИЛОЖЕНИЯ ИЛИ НЕВОЗМОЖНОСТИ ЕГО ИСПОЛЬЗОВАТЬ.
+
+Расчёты калорий, норм питания и веса носят справочный характер и не
+являются медицинской рекомендацией.
+
+Сторонние компоненты — библиотеки из package.json и шрифты — остаются
+под своими лицензиями. Сведения о продуктах, найденных по штрихкоду,
+берутся из базы Open Food Facts (openfoodfacts.org) и распространяются
+по лицензии Open Database License (ODbL).
+
+---
+
+Calorie Diary. Copyright (c) 2026 Koldin. All rights reserved.
+The source is published for viewing only; no permission is granted to
+copy, modify, distribute or reuse it without the author's written consent.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE AUTHOR
+IS NOT LIABLE FOR ANY DAMAGES, INCLUDING DATA LOSS. Nutrition figures are
+for reference only and are not medical advice. Third-party components keep
+their own licenses; barcode product data comes from Open Food Facts (ODbL).
