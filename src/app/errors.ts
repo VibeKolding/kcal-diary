@@ -55,6 +55,41 @@ function message(e: unknown): string {
   return typeof e === 'string' ? e : ''
 }
 
+/** Первая строка стека, указывающая в наш код: «Today-abc123.js:1:2345» */
+export function firstFrame(stack: string | null | undefined): string | null {
+  if (!stack) return null
+  const m = /\/assets\/([\w.-]+\.js):(\d+):(\d+)/.exec(stack)
+  return m ? `${m[1]}:${m[2]}:${m[3]}` : null
+}
+
+/**
+ * Короткий технический код ошибки для снимка экрана.
+ *
+ * Текст на экране ошибки нарочно человеческий, и по снимку с телефона
+ * нельзя было понять, что сломалось: «Браузер не даёт хранить данные»
+ * одинаково выглядит для запрета хранилища, обрыва связи с ним и
+ * SecurityError совсем из другого API. Код — имя ошибки, её сообщение без
+ * адресов и место в собранном файле; с картой исходников той же сборки
+ * по нему находится строка в коде. Личных данных тут нет: сообщения
+ * браузера их не содержат, а адреса вырезаются.
+ */
+export function errorCode(e: unknown, componentStack?: string | null): string {
+  const n = names(e)
+  const msg = message(e)
+    .replace(/https?:\/\/\S+/g, '…')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140)
+  const stack = e && typeof e === 'object' ? (e as { stack?: unknown }).stack : null
+  const parts = [
+    n.length ? n.join(' ← ') : typeof e,
+    msg,
+    firstFrame(typeof stack === 'string' ? stack : null),
+    componentStack ? `в ${firstFrame(componentStack) ?? '?'}` : null,
+  ]
+  return parts.filter(Boolean).join(' · ')
+}
+
 export function isChunkLoadError(e: unknown): boolean {
   return names(e).includes('ChunkLoadError') || CHUNK.test(message(e))
 }

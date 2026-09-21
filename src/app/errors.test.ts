@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeError, isChunkLoadError } from './errors'
+import { describeError, errorCode, firstFrame, isChunkLoadError } from './errors'
 
 /** Ошибка Dexie: обычный Error с именем и, бывает, исходной ошибкой в inner */
 function dexie(name: string, msg = 'x', inner?: unknown): Error {
@@ -69,3 +69,39 @@ describe('describeError', () => {
     expect(describeError('сломалось').text).toBe('сломалось')
   })
 })
+
+describe('errorCode', () => {
+  const safari = 'Qe@https://kcal-diary-koldin.netlify.app/assets/Today-Ab1_c.js:2:5610\nwe@https://kcal-diary-koldin.netlify.app/assets/index-CHwJo6iA.js:40:77'
+  const chrome = 'Error: x\n    at Qe (https://kcal-diary-koldin.netlify.app/assets/Today-Ab1_c.js:2:5610)'
+
+  it('место берётся из первой строки стека в нашем коде, в Safari и Chrome', () => {
+    expect(firstFrame(safari)).toBe('Today-Ab1_c.js:2:5610')
+    expect(firstFrame(chrome)).toBe('Today-Ab1_c.js:2:5610')
+    expect(firstFrame('at native code')).toBeNull()
+    expect(firstFrame(undefined)).toBeNull()
+  })
+
+  it('имя, сообщение без адресов, место ошибки и место в дереве', () => {
+    const e = Object.assign(new Error('Attempt to use history.replaceState() more than 100 times per 10 seconds'), {
+      name: 'SecurityError', stack: safari,
+    })
+    const code = errorCode(e, '\n    at Xe (https://kcal-diary-koldin.netlify.app/assets/Today-Ab1_c.js:3:10)')
+    expect(code).toBe('SecurityError · Attempt to use history.replaceState() more than 100 times per 10 seconds · '
+      + 'Today-Ab1_c.js:2:5610 · в Today-Ab1_c.js:3:10')
+  })
+
+  it('вложенную ошибку Dexie называет цепочкой, адреса вырезает, длину ограничивает', () => {
+    const e = dexie('OpenFailedError', 'UnknownError Connection to Indexed Database server lost. https://tinyurl.com/abc ' + 'x'.repeat(300),
+      dexie('UnknownError'))
+    const code = errorCode(e)
+    expect(code.startsWith('OpenFailedError ← UnknownError · UnknownError Connection to Indexed Database server lost. …')).toBe(true)
+    expect(code).not.toMatch(/tinyurl|https?:/)
+    expect(code.length).toBeLessThan(200)
+  })
+
+  it('не падает на том, что вообще не ошибка', () => {
+    expect(errorCode(undefined)).toBe('undefined')
+    expect(errorCode('сломалось')).toBe('string · сломалось')
+  })
+})
+

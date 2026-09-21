@@ -9,7 +9,7 @@ interface Props {
   fallback?: (error: unknown) => ReactNode
 }
 
-interface State { error: unknown; failed: boolean }
+interface State { error: unknown; failed: boolean; componentStack: string | null }
 
 /**
  * Без этого любая ошибка отрисовки — битая запись из восстановленной
@@ -20,9 +20,9 @@ interface State { error: unknown; failed: boolean }
  * Классом, потому что ловить ошибки отрисовки умеют только классы.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  override state: State = { error: null, failed: false }
+  override state: State = { error: null, failed: false, componentStack: null }
 
-  static getDerivedStateFromError(error: unknown): State {
+  static getDerivedStateFromError(error: unknown): Partial<State> {
     return { error, failed: true }
   }
 
@@ -31,17 +31,20 @@ export class ErrorBoundary extends Component<Props, State> {
     // место в дереве: в сборке без него не понять, какой экран упал.
     // На экран идёт объяснение по-русски (errors.ts).
     console.error('Место ошибки в дереве:', info.componentStack)
+    // И на экран — в коде ошибки: консоль телефона человек не пришлёт
+    this.setState({ componentStack: info.componentStack ?? null })
   }
 
   override componentDidUpdate(prev: Props): void {
     if (this.state.failed && prev.resetKey !== this.props.resetKey) {
-      this.setState({ error: null, failed: false })
+      this.setState({ error: null, failed: false, componentStack: null })
     }
   }
 
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children
     const { fallback } = this.props
-    return fallback ? fallback(this.state.error) : <Crash error={this.state.error} />
+    const { error, componentStack } = this.state
+    return fallback ? fallback(error) : <Crash error={error} componentStack={componentStack} />
   }
 }

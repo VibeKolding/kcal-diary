@@ -3,7 +3,7 @@ import { restorePointAt, undoRestore, BackupError } from '@/features/backup/back
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import { Icon } from '@/ui/Icon'
-import { describeError } from './errors'
+import { describeError, errorCode } from './errors'
 import s from './Crash.module.css'
 
 /**
@@ -14,8 +14,9 @@ import s from './Crash.module.css'
  * путей к белому экрану, а кнопка отката жила в профиле, куда из
  * упавшего приложения не попасть.
  */
-export function Crash({ error }: { error: unknown }) {
+export function Crash({ error, componentStack }: { error: unknown; componentStack?: string | null }) {
   const { kind, title, text } = describeError(error)
+  const code = errorCode(error, componentStack)
   const [canUndo, setCanUndo] = useState(false)
   const [busy, setBusy] = useState(false)
   const [undoError, setUndoError] = useState<string | null>(null)
@@ -71,6 +72,9 @@ export function Crash({ error }: { error: unknown }) {
             </Pill>
           )}
         </div>
+        {/* Мелко и в конце: человеку не нужен, но по снимку экрана с
+            телефона только по нему и видно, что сломалось */}
+        <p className={s.code}>Для разработчика: {code}</p>
       </Glass>
     </div>
   )

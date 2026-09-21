@@ -54,3 +54,16 @@
   gap: var(--s2);
   margin-top: var(--s2);
 }
+
+/* Код ошибки: мелкий, приглушённый, выделяемый — его пересылают снимком
+   или копируют. Длинное имя файла переносится в любом месте, а не
+   распирает карточку на узком экране. */
+.code {
+  margin-top: var(--s2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
