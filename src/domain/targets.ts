@@ -1,4 +1,5 @@
 import type { Activity, Goal, Nutrients, Profile, Sex } from './types'
+import { parseDay } from './dates'
 
 export const ACTIVITY_FACTORS: Record<Activity, number> = {
   sedentary: 1.2,
@@ -58,14 +59,19 @@ export const GOAL_RATES: Record<Goal, number[]> = {
  * иначе возраст замрёт и норма перестанет меняться с годами.
  */
 export function birthDateFromAge(age: number, now = new Date()): string {
-  const d = new Date(now.getFullYear() - age, now.getMonth(), now.getDate())
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${m}-${day}`
+  const year = now.getFullYear() - age
+  const month = now.getMonth()
+  // 29 февраля в невисокосном году Date сам переносит на 1 марта, и возраст
+  // выходил на год меньше. Прижимаем день к последнему дню месяца.
+  const lastDay = new Date(year, month + 1, 0).getDate()
+  const day = Math.min(now.getDate(), lastDay)
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 export function ageFrom(birthDate: string, now = new Date()): number {
-  const b = new Date(birthDate)
+  // parseDay, а не new Date: строку «ГГГГ-ММ-ДД» Date читает как полночь
+  // по UTC, и западнее Гринвича день рождения наступал на сутки раньше
+  const b = parseDay(birthDate)
   let age = now.getFullYear() - b.getFullYear()
   const m = now.getMonth() - b.getMonth()
   if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1
@@ -102,14 +108,62 @@ export interface TargetResult {
 }
 
 /**
+ * Вес, от которого считаются белок и жиры.
+ *
+ * Граммы на килограмм придуманы для обычного телосложения. Жировая ткань
+ * почти не требует белка, и при весе 130 кг «2 г/кг» давали 260 г белка —
+ * вместе с жирами больше калорий, чем во всей норме, и 0 г углеводов.
+ * Поэтому выше ИМТ 25 берётся скорректированный вес: вес при ИМТ 25 плюс
+ * 40 % лишнего — так его считают диетологи для людей с ожирением.
+ */
+export function referenceWeight(weightKg: number, heightCm: number): number {
+  const h = heightCm / 100
+  const atBmi25 = 25 * h * h
+  if (!(atBmi25 > 0) || weightKg <= atBmi25) return weightKg
+  return atBmi25 + 0.4 * (weightKg - atBmi25)
+}
+
+/** Доля нормы, которая при любом раскладе остаётся углеводам */
+export const MIN_CARBS_SHARE = 0.2
+/** Ниже этого жиры не опускаются, даже когда белку и жирам тесно, г/кг */
+export const MIN_FAT_PER_KG = 0.6
+
+/**
+ * Белки, жиры и углеводы под заданную калорийность.
+ *
+ * Белок и жиры — требования цели (GOAL_MACROS) от опорного веса, остаток
+ * уходит в углеводы. Если белку и жирам тесно, углеводам всё равно
+ * остаётся не меньше пятой части нормы: сначала жиры опускаются к 0,6 г/кг,
+ * потом уменьшается белок. Иначе при низкой норме выходили 0 г углеводов,
+ * а сумма БЖУ противоречила самой калорийности.
+ */
+export function splitMacros(
+  kcal: number,
+  body: { weightKg: number; heightCm: number; goal: Goal },
+): Nutrients {
+  const ref = referenceWeight(body.weightKg, body.heightCm)
+  const macros = GOAL_MACROS[body.goal]
+  const budget = Math.max(0, kcal * (1 - MIN_CARBS_SHARE))
+  let protein = Math.round(ref * macros.protein)
+  let fat = Math.round(ref * macros.fat)
+
+  const over = () => protein * 4 + fat * 9 - budget
+  if (over() > 0) fat = Math.max(Math.round(ref * MIN_FAT_PER_KG), fat - Math.ceil(over() / 9))
+  if (over() > 0) protein = Math.max(0, protein - Math.ceil(over() / 4))
+  if (over() > 0) fat = Math.max(0, Math.floor(budget / 9))
+
+  const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4))
+  return { kcal, protein, fat, carbs }
+}
+
+/**
  * Норма калорий и БЖУ.
  *
  * Калории: TDEE ± дефицит/профицит, рассчитанный из желаемого темпа.
  * Пол ограничен снизу величиной базового обмена: опускаться ниже BMR небезопасно,
  * поэтому в таком случае норма поднимается до BMR и поднимается флаг clampedToBmr.
  *
- * БЖУ: белок и жиры берутся из профиля цели (см. GOAL_MACROS),
- * остаток калорий уходит в углеводы.
+ * БЖУ: см. splitMacros.
  */
 export function calcTargets(input: TargetInput, now = new Date()): TargetResult {
   const age = ageFrom(input.birthDate, now)
@@ -128,16 +182,12 @@ export function calcTargets(input: TargetInput, now = new Date()): TargetResult 
   }
 
   kcal = Math.round(kcal / 10) * 10
-
-  const macros = GOAL_MACROS[input.goal]
-  const protein = Math.round(input.weightKg * macros.protein)
-  const fat = Math.round(input.weightKg * macros.fat)
-  const carbsKcal = kcal - protein * 4 - fat * 9
-  // При очень низкой норме углеводы могли бы уйти в минус — прижимаем к нулю.
-  const carbs = Math.max(0, Math.round(carbsKcal / 4))
+  // Округление до десятков могло опустить норму на пару калорий под BMR —
+  // и она разошлась бы с обещанным «не ниже базового обмена». Тогда вверх.
+  if (kcal < bmrValue) kcal = Math.ceil(bmrValue / 10) * 10
 
   return {
-    targets: { kcal, protein, fat, carbs },
+    targets: splitMacros(kcal, input),
     bmr: Math.round(bmrValue),
     tdee: Math.round(tdeeValue),
     clampedToBmr,
@@ -158,4 +208,16 @@ export function targetsForProfile(profile: Profile, weightKg: number, now = new 
     },
     now,
   )
+}
+
+/** Потолок автоматической нормы воды, мл */
+export const MAX_AUTO_WATER_ML = 4000
+
+/**
+ * Норма воды по весу: 30 мл на килограмм. Без потолка при 300 кг выходило
+ * 9 литров — пить столько буквально опасно, поэтому выше 4 л не поднимаем.
+ * Руками в профиле можно поставить любую.
+ */
+export function waterGoalFor(weightKg: number): number {
+  return Math.min(MAX_AUTO_WATER_ML, Math.round(weightKg * 30))
 }

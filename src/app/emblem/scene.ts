@@ -66,7 +66,12 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
 
   const scene = new THREE.Scene()
   const pmrem = new THREE.PMREMGenerator(renderer)
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+  // Комната нужна один раз — снять с неё карту отражений. Саму карту
+  // pmrem.dispose() не освобождает: она своя, её держим до конца.
+  const room = new RoomEnvironment()
+  const envRT = pmrem.fromScene(room, 0.04)
+  room.dispose()
+  scene.environment = envRT.texture
 
   const camera = new THREE.PerspectiveCamera(28, 1, 1, 1000)
   camera.position.set(0, 0, 230)
@@ -82,10 +87,10 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
   scene.add(root)
 
   // --- Свечение за знаком ---
-  const glow = new THREE.Mesh(
-    new THREE.PlaneGeometry(118, 118),
-    new THREE.MeshBasicMaterial({ map: glowTexture(), transparent: true, depthWrite: false }),
-  )
+  const glowGeo = new THREE.PlaneGeometry(118, 118)
+  const glowMap = glowTexture()
+  const glowMat = new THREE.MeshBasicMaterial({ map: glowMap, transparent: true, depthWrite: false })
+  const glow = new THREE.Mesh(glowGeo, glowMat)
   glow.position.z = -40
   root.add(glow)
 
@@ -104,13 +109,14 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
   const SEGMENTS = 160
   const RADIAL = 24
   const ringGeo = new THREE.TubeGeometry(arc, SEGMENTS, 3.2, RADIAL, false)
-  const ring = new THREE.Mesh(ringGeo, glassMaterial(GOLD_2, 0.82))
+  const ringMat = glassMaterial(GOLD_2, 0.82)
+  const ring = new THREE.Mesh(ringGeo, ringMat)
   // Индексов на один сегмент трубы: RADIAL квадов по два треугольника
   const PER_SEGMENT = RADIAL * 6
   // Скруглённые концы, как stroke-linecap: round
   const cap = new THREE.SphereGeometry(3.2, 20, 16)
-  const capA = new THREE.Mesh(cap, ring.material)
-  const capB = new THREE.Mesh(cap, ring.material)
+  const capA = new THREE.Mesh(cap, ringMat)
+  const capB = new THREE.Mesh(cap, ringMat)
   capA.position.copy(arc.getPoint(0))
   capB.position.copy(arc.getPoint(1))
   const ringGroup = new THREE.Group()
@@ -134,7 +140,8 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
 
   // Маска глубины по контуру листа: за прорезями — фон, а не свечение
   const shadowGeo = createLeafShadowGeometry()
-  const shadow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ colorWrite: false }))
+  const shadowMat = new THREE.MeshBasicMaterial({ colorWrite: false })
+  const shadow = new THREE.Mesh(shadowGeo, shadowMat)
   leaf.add(shadow)
 
   const easeOut = (x: number) => 1 - Math.pow(1 - x, 3)
@@ -176,15 +183,30 @@ export function createEmblemScene(canvas: HTMLCanvasElement, cssSize: number, dp
     renderer.render(scene, camera)
   }
 
+  /**
+   * Освобождает всё, что сцена заняла на видеокарте, и сам контекст.
+   * Холст заставки при DPR 3 — 1344×1344 точки, и без явного отказа
+   * контекст держал бы память до сборки мусора, то есть неизвестно сколько.
+   */
   function dispose() {
+    envRT.dispose()
     pmrem.dispose()
-    renderer.dispose()
+    glowGeo.dispose()
+    glowMat.dispose()
+    glowMap.dispose()
+    ringGeo.dispose()
+    ringMat.dispose()
+    cap.dispose()
     leafGeo.dispose()
-    shadowGeo.dispose()
     leafMat.dispose()
     cutMat.dispose()
-    ringGeo.dispose()
-    cap.dispose()
+    shadowGeo.dispose()
+    shadowMat.dispose()
+    const gl = renderer.getContext()
+    // Сначала dispose: он снимает слушатели three, иначе тот напишет
+    // в консоль «Context Lost» на нашу же намеренную потерю
+    renderer.dispose()
+    if (!gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext()
   }
 
   return { render, dispose, renderer }

@@ -118,4 +118,25 @@ describe('посев базы продуктов', () => {
       .map((f) => f.name)
     expect(hams).toEqual(['Ветчина куриная'])
   })
+
+  /*
+   * Сетевая осечка при уже засеянной базе закрывала весь дневник экраном
+   * «Failed to fetch», хотя все данные были на месте.
+   */
+  it('без сети работает со старым справочником и пробует снова в следующий раз', async () => {
+    mockFetch(raw)
+    await seedFoods()
+    const count = await db.foods.count()
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    await expect(seedFoods()).resolves.toBeUndefined()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => null })))
+    await expect(seedFoods()).resolves.toBeUndefined()
+    expect(await db.foods.count()).toBe(count)
+  })
+
+  it('на самом первом запуске без справочника говорит об этом по-русски', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    await expect(seedFoods()).rejects.toThrow(/Не удалось загрузить базу продуктов/)
+  })
 })

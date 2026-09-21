@@ -1,37 +1,44 @@
 import { fileURLToPath, URL } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { SECURITY_HEADERS } from './src/app/securityHeaders'
 
+/*
+ * Заголовки безопасности живут в src/app/securityHeaders.ts. Для боевых
+ * хостингов они продублированы в netlify.toml, vercel.json и
+ * public/_headers (копии сверяет тест), а здесь — чтобы локальное превью
+ * вело себя так же и нарушения находились до выкладки.
+ */
 
-// Заголовки безопасности. Продублированы в netlify.toml, vercel.json и
-// public/_headers для боевых хостингов, а здесь — чтобы локальное превью
-// вело себя так же и нарушения находились до выкладки.
-const SECURITY_HEADERS = {
-  'Content-Security-Policy': [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    // data: нужен для шрифта: мелкие подмножества Manrope вшиваются
-    // прямо в CSS. Шрифт в data-URI выполнить нельзя, риска нет.
-    "font-src 'self' data:",
-    "img-src 'self' data: blob:",
-    "media-src 'self' blob:",
-    // Единственный внешний адрес во всём приложении — база штрихкодов
-    "connect-src 'self' https://world.openfoodfacts.org",
-    "worker-src 'self'",
-    "manifest-src 'self'",
-  ].join('; '),
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-  'Referrer-Policy': 'no-referrer',
-  'Permissions-Policy':
-    'camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
+/**
+ * В public/ лежат README и промты для картинок: они нужны в репозитории
+ * рядом с файлами, которые описывают, но на сайте им делать нечего. Vite
+ * копирует public/ целиком, поэтому после сборки .md убираются из выдачи.
+ * Туда же .DS_Store — Finder кладёт их в папки сам, а при выкладке
+ * локальной папки dist (Netlify Drop) они уезжали бы на сайт.
+ */
+function dropRepoFiles(): Plugin {
+  let outDir = ''
+  const drop = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) drop(path)
+      else if (entry.name === '.DS_Store' || /\.md$/i.test(entry.name)) rmSync(path)
+    }
+  }
+  return {
+    name: 'kcal:drop-repo-files',
+    apply: 'build',
+    enforce: 'post',
+    configResolved(config) { outDir = resolve(config.root, config.build.outDir) },
+    // writeBundle, а не closeBundle: public/ к этому моменту уже скопирован,
+    // а воркер (VitePWA, closeBundle) ещё не собран и не видит лишнего
+    writeBundle() { if (existsSync(outDir)) drop(outDir) },
+  }
 }
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8')) as {
@@ -52,9 +59,10 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    dropRepoFiles(),
     VitePWA({
       registerType: 'prompt',
-      // Регистрирует хук useAppUpdate через virtual:pwa-register — иначе
+      // Регистрирует сам useAppUpdate (src/app/swUpdate.ts) — иначе
       // воркер регистрировался бы дважды.
       injectRegister: false,
       // includeAssets не нужен для того, что уже покрыто globPatterns ниже:
@@ -100,12 +108,18 @@ export default defineConfig({
       workbox: {
         // Весь шелл, шрифты и вшитая база продуктов кладутся в кэш при установке.
         globPatterns: ['**/*.{js,css,html,woff2,png,svg,json,webp}'],
-        // Снимки упражнений в предкэш не попадают: их четыре десятка, и
+        // Снимки упражнений в предкэш не попадают: их почти семьдесят, и
         // при установке они утроили бы вес приложения ради картинок, до
         // которых большинство не дойдёт. Они кэшируются по факту открытия.
-        globIgnores: ['**/images/gym/ex/**'],
+        // sw-*.js подключаются в сам воркер (importScripts ниже), и браузер
+        // хранит их вместе с ним — в предкэше они лишние.
+        globIgnores: ['**/images/gym/ex/**', 'sw-*.js'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: '/index.html',
+        // Нажатие на напоминание открывает дневник. generateSW своих
+        // обработчиков уведомлений не пишет, а без notificationclick
+        // нажатие на уведомление из воркера ничего не делало.
+        importScripts: ['sw-notifications.js'],
         // Open Food Facts — единственный внешний адрес. Только сеть, без кэша:
         // офлайн-ветка живёт в коде и читает локальную базу.
         runtimeCaching: [
@@ -114,9 +128,13 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
-            // Снимок упражнения: один раз посмотрели — дальше доступен офлайн
+            // Снимок упражнения: один раз посмотрели — дальше доступен офлайн.
+            // StaleWhileRevalidate, а не CacheFirst: адрес снимка постоянный,
+            // и перегенерированный файл под тем же именем CacheFirst не
+            // показал бы до полугода. Здесь из кэша отдаётся сразу, а свежая
+            // копия подтягивается в фоне и видна со следующего открытия.
             urlPattern: /\/images\/gym\/ex\/.*\.webp$/i,
-            handler: 'CacheFirst',
+            handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'gym-shots',
               // Снимков 69 — по одному на пару «упражнение × пол». Предел
@@ -130,9 +148,9 @@ export default defineConfig({
               // Фильтр по типу ответа — не перестраховка, а условие работы.
               // Хостинг отдаёт index.html с кодом 200 на любой ненайденный
               // путь (см. public/_redirects), то есть отсутствующий снимок
-              // приходит успешным ответом. Без фильтра CacheFirst положил бы
-              // эту заглушку в кэш под именем снимка и полгода отдавал её
-              // оттуда — файл, добавленный позже, не появился бы никогда.
+              // приходит успешным ответом. Без фильтра эта заглушка легла бы
+              // в кэш под именем снимка — а фоновое обновление вдобавок
+              // затёрло бы ею настоящий кадр, если файл убрали с сервера.
               cacheableResponse: {
                 statuses: [200],
                 headers: { 'Content-Type': 'image/webp' },

@@ -21,20 +21,55 @@
   text-align: center;
 }
 .gramsInput:focus { border-color: var(--glass-border); }
+/* Смена прозрачности рамки с клавиатуры почти не видна — нужно кольцо.
+   --focus-ring, если он есть в токенах, иначе приглушённый текст:
+   он держит контраст 3:1 к фону в обеих темах */
+.gramsInput:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--text-dim));
+  outline-offset: 2px;
+}
+.gramsInput[aria-invalid='true'] { border-color: var(--danger); }
+
+.gramsError {
+  margin-top: var(--s2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--danger);
+}
 
 .unit { font-size: var(--fs-ui); font-weight: 700; color: var(--text-dim); }
 
+/* Полоса тонкая, а сам ползунок высотой с бегунок: пока полосой был весь
+   элемент, зона касания тоже была 6 px, и попасть можно было только в бегунок */
 .slider {
   width: 100%;
   appearance: none;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: none;
+  outline: none;
+}
+.slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: var(--radius-pill);
   background: var(--track);
-  outline: none;
+}
+.slider::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--track);
+}
+/* Без этого у ползунка с клавиатуры не было никакого признака фокуса */
+.slider:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--text-dim));
+  outline-offset: 2px;
 }
 .slider::-webkit-slider-thumb {
   appearance: none;
+  box-sizing: border-box;
   width: 26px; height: 26px;
+  /* Бегунок на размеченной дорожке встаёт по её верху — центрируем: (6 − 26) / 2 */
+  margin-top: -10px;
   border-radius: 50%;
   background: var(--gold);
   border: 3px solid var(--bg);
@@ -65,6 +100,7 @@
 
 .sheetActions { display: flex; align-items: center; gap: var(--s2); }
 .closeBtn {
+  position: relative;
   display: grid; place-items: center;
   width: var(--h-sm); height: var(--h-sm);
   border-radius: 50%;
@@ -72,4 +108,12 @@
   background: var(--glass);
   color: var(--text-dim);
   flex: none;
+}
+/* Кружок как у крестика других панелей, а зона касания — полные 44 px.
+   Отступ считается от внутренней стороны рамки, отсюда лишний пиксель */
+.closeBtn::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--h-sm) - var(--h-md)) / 2 - 1px);
+  border-radius: 50%;
 }

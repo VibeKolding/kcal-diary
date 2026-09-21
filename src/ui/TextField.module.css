@@ -15,13 +15,19 @@
   border-radius: var(--radius-chip);
   border: 1px solid var(--glass-border-soft);
   background: var(--glass);
-  transition: border-color var(--dur-fast) var(--ease);
+  cursor: text;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-.box:focus-within { border-color: var(--glass-border); }
+/* Фокус — непрозрачным цветом и в два пикселя: полупрозрачная рамка
+   давала 1.4:1 к фону, и поле в фокусе было не отличить от соседних */
+.box:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
 .invalid { border-color: var(--danger); }
 
 .input {
   flex: 1;
+  /* Во всю высоту рамки: касание выше или ниже строки текста попадает
+     в само поле, и курсор встаёт туда, куда нажали */
+  align-self: stretch;
   min-width: 0;
   width: 100%;
   border: none;

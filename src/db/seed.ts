@@ -34,10 +34,23 @@ function toFood(raw: RawFood): Food {
   }
 }
 
+/** Файл справочника или null, если он не загрузился или пришёл битым */
+async function loadDoc(): Promise<RawDoc | null> {
+  try {
+    const res = await fetch('/data/foods.json')
+    if (!res.ok) return null
+    const doc = (await res.json()) as Partial<RawDoc> | null
+    if (typeof doc?.version !== 'number' || !Array.isArray(doc.items)) return null
+    return doc as RawDoc
+  } catch {
+    return null
+  }
+}
+
 /**
  * Посев базы при первом запуске и при выходе новой версии справочника.
  *
- * Две вещи, которые здесь легко сломать:
+ * Три вещи, которые здесь легко сломать:
  *
  * 1. Продукты, которые пользователь завёл или отредактировал сам, не трогаются —
  *    bulkPut перезаписал бы их.
@@ -50,11 +63,17 @@ function toFood(raw: RawFood): Food {
  *    а не ссылку на продукт.
  */
 export async function seedFoods(): Promise<void> {
-  const res = await fetch('/data/foods.json')
-  if (!res.ok) throw new Error(`Не удалось загрузить базу продуктов: ${res.status}`)
-  const doc = (await res.json()) as RawDoc
-
   const seeded = await getMeta<number>(META.seedVersion, 0)
+  const doc = await loadDoc()
+  if (!doc) {
+    // Справочник уже лежит в базе — работаем со старым, а новую версию
+    // заберём при следующем запуске. Раньше любая сетевая осечка закрывала
+    // весь дневник экраном «Failed to fetch», хотя все данные были на месте.
+    if (seeded > 0) return
+    throw new Error(
+      'Не удалось загрузить базу продуктов. Проверьте интернет и откройте приложение ещё раз.',
+    )
+  }
   if (seeded >= doc.version) return
 
   const userOwned = new Set(

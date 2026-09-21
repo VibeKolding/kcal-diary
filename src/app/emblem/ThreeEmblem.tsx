@@ -4,9 +4,27 @@ import { Logo, EMBLEM_FALLBACK_RATIO } from '@/ui/Logo'
 import s from './Emblem.module.css'
 
 /**
+ * Есть ли WebGL 2 — без него three не работает (первую версию он не
+ * поддерживает с r163). Спрашиваем на отдельном холсте до загрузки сцены:
+ * иначе three сам пробует создать контекст, пишет в консоль три ошибки
+ * и только потом сдаётся — а чанк на полторы сотни килобайт уже скачан зря.
+ */
+function hasWebGL2(): boolean {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2')
+    if (!gl) return false
+    // Пробный контекст сразу отдаём: браузер держит их считаные штуки
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Вариант 4: настоящее 3D. Сцена подгружается отдельным чанком вместе
  * с three — на заставку без этого варианта он не попадает.
- * Нет WebGL или чанк ещё едет — SVG-знак.
+ * Нет WebGL, чанк ещё едет или видеокарта отобрала контекст — SVG-знак.
  */
 export function ThreeEmblem({ size = 224 }: { size?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -18,18 +36,34 @@ export function ThreeEmblem({ size = 224 }: { size?: number }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (!hasWebGL2()) { setFailed(true); return }
     let alive = true
     let raf = 0
     let scene: Awaited<ReturnType<typeof load>> | null = null
 
+    // Контекст может пропасть посреди заставки: видеокарта сброшена,
+    // браузер отобрал его другой вкладке. Сцена тогда молча пустеет —
+    // вместо неё возвращаем плоский знак.
+    const onLost = () => {
+      cancelAnimationFrame(raf)
+      alive = false
+      setFailed(true)
+    }
+    canvas.addEventListener('webglcontextlost', onLost)
+
     async function load() {
       const { createEmblemScene } = await import('./scene')
+      // Эффект уже сняли (StrictMode, уход заставки): контекст на этом
+      // холсте не создаём вовсе — иначе следующий эффект получил бы его
+      // уже отданным
+      if (!alive) return null
       // Полная плотность экрана: при прежнем потолке в два на трёхкратном
       // экране кадр растягивался в полтора раза, и прорези листа мылились
       return createEmblemScene(canvas!, size, window.devicePixelRatio || 1)
     }
 
     load().then((sc) => {
+      if (!sc) return
       if (!alive) { sc.dispose(); return }
       scene = sc
       setReady(true)
@@ -39,6 +73,7 @@ export function ThreeEmblem({ size = 224 }: { size?: number }) {
       const ENTER_MS = 900
       let start = 0
       const frame = (t: number) => {
+        if (!alive) return
         if (!start) start = t
         // Время отсчитывается от появления знака, а не от загрузки страницы.
         // С абсолютным временем фаза парения и положение источников света
@@ -55,6 +90,9 @@ export function ThreeEmblem({ size = 224 }: { size?: number }) {
     return () => {
       alive = false
       cancelAnimationFrame(raf)
+      // Слушатель снимаем раньше dispose: он сам отдаёт контекст, и это
+      // не повод показывать запасной знак
+      canvas.removeEventListener('webglcontextlost', onLost)
       scene?.dispose()
     }
   }, [size])
@@ -66,7 +104,10 @@ export function ThreeEmblem({ size = 224 }: { size?: number }) {
   return (
     <div className={s.stage} style={{ width: size, height: size }}>
       {!ready && <Logo size={flat} animated solid />}
+      {/* key: при смене размера — новый холст. На старом контекст уже отдан
+          в dispose, и браузер вернул бы новой сцене именно его, потерянный */}
       <canvas
+        key={size}
         ref={canvasRef}
         className={`${s.canvas} ${ready ? s.enter : ''}`}
         width={size} height={size}

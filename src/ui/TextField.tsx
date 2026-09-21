@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, type MouseEvent, type ReactNode } from 'react'
 import s from './TextField.module.css'
 
 export interface TextFieldProps {
@@ -29,12 +29,22 @@ export function TextField({
   autoComplete = 'off', trailing, type = 'text', compact,
 }: TextFieldProps) {
   const id = useId()
+  const input = useRef<HTMLInputElement>(null)
+
+  // Рамка поля — 54 px, а текст в ней — полоска в 24–30: касание по краю
+  // рамки или по единице измерения тоже ставит курсор. Кнопки внутри
+  // (например, очистка) работают как обычно.
+  const focusInput = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.target instanceof Element && e.target.closest('button, a, input, select, textarea')) return
+    input.current?.focus()
+  }
 
   return (
     <div className={`${s.field} ${compact ? s.compact : ''}`}>
       {label && <label className={s.label} htmlFor={id}>{label}</label>}
-      <div className={`${s.box} ${error ? s.invalid : ''}`}>
+      <div className={`${s.box} ${error ? s.invalid : ''}`} onClick={focusInput}>
         <input
+          ref={input}
           id={id}
           className={`${s.input} ${size === 'lg' ? s.lg : ''}`}
           type={type}

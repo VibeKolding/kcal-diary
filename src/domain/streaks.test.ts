@@ -21,6 +21,17 @@ describe('verdict', () => {
   it('день без записей помечает пустым', () => {
     expect(verdict(day('2026-09-07', 0))).toBe('empty')
   })
+
+  /*
+   * Записали только воду: день продлевает серию и входит в «за N дней»,
+   * значит, и в разбивке он должен быть, а не теряться как «пустой».
+   */
+  it('день с одной водой (0 ккал) — недобор, а не пустота', () => {
+    const water: DayStat = { date: '2026-09-07', kcal: 0, target: 2000, logged: true }
+    expect(verdict(water)).toBe('under')
+    expect(accuracy([water, day('2026-09-06', 2000)])).toBe(0.5)
+    expect(averageKcal([water, day('2026-09-06', 2000)])).toBe(1000)
+  })
 })
 
 describe('currentStreak', () => {

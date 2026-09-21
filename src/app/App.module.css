@@ -9,10 +9,20 @@
   font-weight: 600;
 }
 
-.fatal {
-  max-width: 420px;
-  padding: var(--s5);
-  text-align: center;
-  line-height: 1.6;
-  color: var(--danger);
+/*
+ * Полоски состояния — «нет сети» и «новая версия». Лежат в потоке над
+ * экраном и сдвигают его вниз, а не накрывают заголовок и «Назад».
+ *
+ * Экран под ними сам отступает от выреза на max(--s5, safe-area). Второй
+ * раз этот отступ не нужен: полоска уже стоит под вырезом. Отрицательный
+ * нижний отступ его забирает, и от полоски до экрана остаётся ровно --s3
+ * на любом телефоне.
+ */
+.status {
+  display: grid;
+  justify-items: center;
+  gap: var(--s2);
+  padding: calc(var(--s2) + env(safe-area-inset-top)) var(--s3) 0;
+  margin-bottom: calc(var(--s3) - max(var(--s5), env(safe-area-inset-top)));
 }
+.status:empty { display: none; }

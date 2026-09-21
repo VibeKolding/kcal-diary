@@ -13,9 +13,14 @@ export type DayVerdict = 'empty' | 'under' | 'onTarget' | 'over'
 /**
  * Оценка дня относительно нормы. Коридор ±10 % считается попаданием:
  * требовать точного числа бессмысленно, взвешивание еды всегда приблизительно.
+ *
+ * Пустой — только день без записей. День, где записана одна вода (0 ккал),
+ * — это день с записями: он продлевает серию и входит в «за N дней», поэтому
+ * и в оценке он недобор, а не пустота. Раньше разбивка «сверх · ниже · в
+ * коридоре» теряла такой день и в сумме не сходилась с числом дней.
  */
 export function verdict(stat: DayStat, tolerance = TOLERANCE): DayVerdict {
-  if (!stat.logged || stat.kcal === 0) return 'empty'
+  if (!stat.logged) return 'empty'
   const low = stat.target * (1 - tolerance)
   const high = stat.target * (1 + tolerance)
   if (stat.kcal < low) return 'under'
@@ -62,14 +67,15 @@ export function bestStreak(stats: DayStat[]): number {
 
 /** Доля дней, попавших в коридор нормы, среди дней с записями */
 export function accuracy(stats: DayStat[], tolerance = TOLERANCE): number {
-  const logged = stats.filter((s) => s.logged && s.kcal > 0)
+  const logged = stats.filter((s) => s.logged)
   if (logged.length === 0) return 0
   const hits = logged.filter((s) => verdict(s, tolerance) === 'onTarget').length
   return hits / logged.length
 }
 
+/** Среднее за день по дням с записями — тем же, что и в итоге периода */
 export function averageKcal(stats: DayStat[]): number {
-  const logged = stats.filter((s) => s.logged && s.kcal > 0)
+  const logged = stats.filter((s) => s.logged)
   if (logged.length === 0) return 0
   return logged.reduce((sum, s) => sum + s.kcal, 0) / logged.length
 }

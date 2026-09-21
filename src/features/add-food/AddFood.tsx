@@ -1,9 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet } from '@/ui/Sheet'
 import { Chip, ChipRow } from '@/ui/Chip'
 import { Pill } from '@/ui/Pill'
 import { FoodIcon, CATEGORY_LABELS } from '@/ui/FoodIcon'
 import { MEAL_LABELS, MEALS } from '@/domain/nutrition'
+import { humanDay } from '@/domain/dates'
 import type { Food, FoodCategory, Meal, Profile } from '@/domain/types'
 import type { CatalogRecipe } from '@/db/catalog'
 import { recentFoods, searchFoods, createFood, frequentFoods } from '@/db/foods'
@@ -19,6 +21,10 @@ import { Icon } from '@/ui/Icon'
 import { TextField } from '@/ui/TextField'
 import { NumberField, parseNumber } from '@/ui/NumberField'
 import { useLast } from '@/ui/useLast'
+import { useToday } from '@/features/today/useToday'
+import { useSave } from '@/features/today/useSave'
+import { mealForTime } from './meal'
+import { per100Problem } from './manualFood'
 import s from './AddFood.module.css'
 
 /*
@@ -38,7 +44,8 @@ type DishSource = 'mine' | 'catalog'
 
 interface Props {
   open: boolean
-  meal: Meal
+  /** Приём, из которого открыли панель. Без него — по времени суток */
+  meal?: Meal
   date: string
   profile: Profile
   onClose: () => void
@@ -46,11 +53,16 @@ interface Props {
 
 export function AddFood({ open, meal, date, profile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('search')
-  const [activeMeal, setActiveMeal] = useState<Meal>(meal)
+  const [activeMeal, setActiveMeal] = useState<Meal>(() => meal ?? mealForTime())
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Food[]>([])
   const [frequent, setFrequent] = useState<Food[]>([])
-  const [favorites, setFavorites] = useState<Food[]>([])
+  // Избранное — живым запросом: звезду ставят в панели порции поверх этой,
+  // и после её закрытия продукт должен уже стоять в ряду, а снятый — исчезнуть
+  const favorites = useLiveQuery(async () => {
+    const rows = await db.foods.bulkGet(await favoriteIds('food'))
+    return rows.filter((f): f is Food => !!f)
+  }, []) ?? []
   const [quick, setQuick] = useState('')
   // Состав быстрой записи. Свёрнут по умолчанию: блок нужен ровно тогда,
   // когда состав неизвестен, и три лишних поля убили бы его смысл.
@@ -74,19 +86,21 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
   // панели одновременно на экране в приложении не появляются
   const [openedDish, setOpenedDish] = useState<CatalogRecipe | null>(null)
   const dishSeen = useLast(openedDish)
+  const quickSave = useSave()
+  const today = useToday()
 
-  useEffect(() => { setActiveMeal(meal) }, [meal])
   useEffect(() => {
     if (open) {
+      // Каждое открытие берёт приём из той кнопки, которой панель открыли.
+      // Раньше он сбрасывался, только когда менялся сам проп: закрыли панель
+      // на «Ужине» — и следующий перекус молча уходил в ужин
+      setActiveMeal(meal ?? mealForTime())
       setTab('search'); setQuery(''); setDishSource('mine'); setOpenedDish(null); setQuick('')
       setQuickOpen(false); setQp(''); setQf(''); setQc('')
       // Частое: то, что добавляли чаще всего. Функция была, кнопки — нет.
       void frequentFoods(8).then(setFrequent)
-      void favoriteIds('food')
-        .then((ids) => db.foods.bulkGet(ids))
-        .then((rows) => setFavorites(rows.filter((f): f is Food => !!f)))
     }
-  }, [open])
+  }, [open, meal])
 
   useEffect(() => {
     let cancelled = false
@@ -101,10 +115,15 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
   }, [query, open, picked])
 
   const isSearching = query.trim().length >= 2
+  // Панель открывают и с прошлого дня — тогда день стоит в заголовке, чтобы
+  // было видно, куда ляжет запись
+  const title = date === today
+    ? 'Добавить еду'
+    : `Добавить за ${humanDay(date, today).toLowerCase()}`
 
   return (
     <>
-      <Sheet open={open && !picked && !openedDish} title="Добавить еду" onClose={onClose}>
+      <Sheet open={open && !picked && !openedDish} title={title} onClose={onClose}>
         <div className={s.wrap}>
           <ChipRow>
             {MEALS.map((m) => (
@@ -123,19 +142,30 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
 
           {tab === 'search' && (
             <>
-              <label className={s.search}>
-                <Icon name="search" size={18} />
-                <input
-                  className={s.searchInput}
-                  placeholder="Что вы съели?"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoComplete="off"
-                />
+              {/* Кнопка очистки — вне label: внутри неё её «Очистить»
+                  становилось именем самого поля для скринридера */}
+              <div className={s.search}>
+                <label className={s.searchField}>
+                  <Icon name="search" size={18} />
+                  <input
+                    className={s.searchInput}
+                    enterKeyHint="search"
+                    placeholder="Что вы съели?"
+                    aria-label="Поиск продукта"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
                 {query && (
-                  <button className="pressable" onClick={() => setQuery('')} aria-label="Очистить"><Icon name="close" size={16} /></button>
+                  <button
+                    type="button" className={`${s.clear} pressable`}
+                    onClick={() => setQuery('')} aria-label="Очистить поиск"
+                  >
+                    <Icon name="close" size={16} />
+                  </button>
                 )}
-              </label>
+              </div>
 
               {!isSearching && favorites.length > 0 && (
                 <>
@@ -219,15 +249,15 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
                     value={quick} onChange={setQuick}
                   />
                   <Pill
-                    disabled={quickKcal <= 0}
-                    onClick={async () => {
+                    disabled={quickKcal <= 0 || quickSave.pending}
+                    onClick={() => void quickSave.run(async () => {
                       await addQuickEntry(quickKcal, activeMeal, date, {
                         protein: num(qp), fat: num(qf), carbs: num(qc),
                       })
                       tap()
                       setQuick(''); setQp(''); setQf(''); setQc(''); setQuickOpen(false)
                       onClose()
-                    }}
+                    })}
                   >Записать</Pill>
                 </div>
 
@@ -284,6 +314,8 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
       <PortionSheet
         food={picked}
         onClose={() => { setPicked(null); setPickedRecipe(null) }}
+        // Сбой записи бросается дальше: PortionSheet покажет тост и останется
+        // открытой, а не закроется так, будто еда записана
         onConfirm={async (food, grams) => {
           if (pickedRecipe) {
             await addRecipeEntry(pickedRecipe.recipe, food.per100, grams, activeMeal, date)
@@ -314,6 +346,7 @@ export function AddFood({ open, meal, date, profile, onClose }: Props) {
 const CATEGORIES = Object.keys(CATEGORY_LABELS) as FoodCategory[]
 
 function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
+  const { pending, run } = useSave()
   const [name, setName] = useState('')
   const [category, setCategory] = useState<FoodCategory>('dish')
   const [kcal, setKcal] = useState('')
@@ -329,20 +362,21 @@ function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
     [protein, fat, carbs],
   )
 
-  const valid = name.trim().length >= 2 && (num(kcal) > 0 || derivedKcal > 0)
+  const per100 = {
+    kcal: num(kcal) > 0 ? num(kcal) : derivedKcal,
+    protein: num(protein),
+    fat: num(fat),
+    carbs: num(carbs),
+  }
+  const problem = per100Problem(per100)
+  const valid = name.trim().length >= 2 && per100.kcal > 0 && problem === null
 
-  async function submit() {
-    const food = await createFood({
-      name,
-      category,
-      per100: {
-        kcal: num(kcal) > 0 ? num(kcal) : derivedKcal,
-        protein: num(protein),
-        fat: num(fat),
-        carbs: num(carbs),
-      },
+  // Двойное касание заводило два одинаковых продукта: в поиске их стало
+  // два, и «Частое» с «Недавним» расходились между ними
+  function submit() {
+    void run(async () => {
+      onCreated(await createFood({ name, category, per100 }))
     })
-    onCreated(food)
   }
 
   return (
@@ -373,11 +407,13 @@ function ManualForm({ onCreated }: { onCreated: (food: Food) => void }) {
         </div>
       </div>
 
-      {!kcal && derivedKcal > 0 && (
+      {problem ? (
+        <p className={s.error} role="alert">{problem}</p>
+      ) : !kcal && derivedKcal > 0 && (
         <p className={s.hint}>Калорийность посчитана из БЖУ: {derivedKcal} ккал на 100 г.</p>
       )}
 
-      <Pill block disabled={!valid} onClick={submit}>Сохранить продукт</Pill>
+      <Pill block disabled={!valid || pending} onClick={submit}>Сохранить продукт</Pill>
     </div>
   )
 }

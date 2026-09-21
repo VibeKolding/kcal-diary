@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import { NumberField, parseNumber } from '@/ui/NumberField'
@@ -6,10 +7,17 @@ import type { Profile, WeightRecord } from '@/domain/types'
 import { humanDay, dayKey } from '@/domain/dates'
 import { humanWeeks, weeklyTrend, weeksToTarget } from '@/domain/weight'
 import { putWeight, weightHistory } from '@/db/tracking'
+import { db } from '@/db/db'
 import { resetToAutoTargets, updateProfile } from '@/db/profile'
 import { tap } from '@/ui/haptic'
 import { CountUp } from '@/ui/CountUp'
 import s from './WeightCard.module.css'
+
+/** Обхват в сантиметрах: ловим опечатку вроде «855» вместо «85,5» */
+function girthError(raw: string): string | null {
+  const n = parseNumber(raw)
+  return n !== null && (n < 30 || n > 250) ? 'От 30 до 250 см' : null
+}
 
 /**
  * Вес живёт рядом с анкетой: это такой же факт о человеке, как рост и
@@ -20,7 +28,14 @@ import s from './WeightCard.module.css'
 export function WeightCard({
   profile, onSaved,
 }: { profile: Profile; onSaved: (text: string) => void }) {
-  const [history, setHistory] = useState<WeightRecord[]>([])
+  // Живые запросы: история меняется не только отсюда. После «Восстановить
+  // из файла» и «Вернуть как было» карточка раньше показывала прежний вес
+  // вперемешку с новой целью, пока не уйти с экрана.
+  const loaded = useLiveQuery(() => weightHistory(180), [])
+  const history = loaded ?? []
+  // «За всё время» — от самого первого взвешивания, а не от первого из 180
+  // последних: после полугода ежедневных записей начало выпадало из окна
+  const first = useLiveQuery(() => db.weights.orderBy('date').first(), [])
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
   const [target, setTarget] = useState(profile.targetWeightKg ? String(profile.targetWeightKg) : '')
@@ -28,11 +43,12 @@ export function WeightCard({
   const [waist, setWaist] = useState('')
   const [chest, setChest] = useState('')
   const [hips, setHips] = useState('')
+  const girthsBox = useRef<HTMLDivElement>(null)
 
-  const reload = useCallback(() => {
-    void weightHistory(180).then(setHistory)
-  }, [])
-  useEffect(reload, [reload])
+  // Кнопка «+ обхваты» исчезает при нажатии — фокус переходит в первое поле
+  useEffect(() => {
+    if (girths) girthsBox.current?.querySelector('input')?.focus()
+  }, [girths])
   useEffect(() => {
     setTarget(profile.targetWeightKg ? String(profile.targetWeightKg) : '')
   }, [profile.targetWeightKg])
@@ -40,14 +56,16 @@ export function WeightCard({
   const latest = history[history.length - 1]
   const previous = history[history.length - 2]
   const delta = latest && previous ? latest.kg - previous.kg : 0
-  const first = history[0]
   const total = latest && first ? latest.kg - first.kg : 0
   const lastGirths = [...history].reverse().find((r) => r.waist || r.chest || r.hips)
 
   const parsed = parseNumber(value)
   const error = parsed !== null && (parsed < 30 || parsed > 300)
     ? 'От 30 до 300 кг' : null
-  const valid = parsed !== null && !error
+  const waistError = girthError(waist)
+  const chestError = girthError(chest)
+  const hipsError = girthError(hips)
+  const valid = parsed !== null && !error && !waistError && !chestError && !hipsError
 
   const targetParsed = parseNumber(target)
   const targetError = targetParsed !== null && (targetParsed < 30 || targetParsed > 300)
@@ -65,7 +83,11 @@ export function WeightCard({
     try {
       const kg = Math.round(parsed * 10) / 10
       const rec: WeightRecord = { date: dayKey(), kg }
-      const w = parseNumber(waist); const c = parseNumber(chest); const h = parseNumber(hips)
+      const cm = (raw: string) => {
+        const n = parseNumber(raw)
+        return n ? Math.round(n * 10) / 10 : null
+      }
+      const w = cm(waist); const c = cm(chest); const h = cm(hips)
       if (w) rec.waist = w
       if (c) rec.chest = c
       if (h) rec.hips = h
@@ -74,7 +96,6 @@ export function WeightCard({
       if (!profile.targetsManual) await resetToAutoTargets(parsed)
       tap()
       setValue(''); setWaist(''); setChest(''); setHips('')
-      reload()
       onSaved(profile.targetsManual
         ? 'Вес записан. Норма задана вручную, поэтому не изменилась.'
         : 'Вес записан, норма и вода пересчитаны.')
@@ -117,7 +138,7 @@ export function WeightCard({
             )}
           </span>
         </div>
-      ) : (
+      ) : loaded && (
         <p className={s.note}>
           Запишите первое взвешивание — с него начнётся график в отчётах.
         </p>
@@ -139,13 +160,14 @@ export function WeightCard({
         />
 
         {girths ? (
-          <div className={s.girths}>
-            <NumberField label="Талия" unit="см" size="md" value={waist} onChange={setWaist}
-              placeholder={lastGirths?.waist ? String(lastGirths.waist) : ''} />
-            <NumberField label="Грудь" unit="см" size="md" value={chest} onChange={setChest}
-              placeholder={lastGirths?.chest ? String(lastGirths.chest) : ''} />
-            <NumberField label="Бёдра" unit="см" size="md" value={hips} onChange={setHips}
-              placeholder={lastGirths?.hips ? String(lastGirths.hips) : ''} />
+          // Дробные: «85,5» раньше превращалось в 855 — целое поле съедало запятую
+          <div ref={girthsBox} className={s.girths}>
+            <NumberField label="Талия" unit="см" size="md" decimal value={waist} onChange={setWaist}
+              error={waistError} placeholder={lastGirths?.waist ? String(lastGirths.waist) : ''} />
+            <NumberField label="Грудь" unit="см" size="md" decimal value={chest} onChange={setChest}
+              error={chestError} placeholder={lastGirths?.chest ? String(lastGirths.chest) : ''} />
+            <NumberField label="Бёдра" unit="см" size="md" decimal value={hips} onChange={setHips}
+              error={hipsError} placeholder={lastGirths?.hips ? String(lastGirths.hips) : ''} />
           </div>
         ) : (
           <button className={`${s.link} pressable`} onClick={() => setGirths(true)}>

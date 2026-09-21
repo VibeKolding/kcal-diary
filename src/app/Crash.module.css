@@ -1,0 +1,56 @@
+/*
+ * Экран ошибки встаёт на место экрана: внутри маршрутов под ним остаётся
+ * таб-бар, и можно уйти на другой раздел. Отсюда нижний отступ под бар.
+ */
+.screen {
+  min-height: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: max(var(--s5), env(safe-area-inset-top)) var(--s4)
+           calc(var(--tabbar-h) + var(--s7) + env(safe-area-inset-bottom));
+}
+
+.card {
+  max-width: 420px;
+  display: grid;
+  justify-items: center;
+  gap: var(--s3);
+  text-align: center;
+}
+
+/* Блик стекла (::before у Glass) лежит поверх обычного содержимого и
+   выбеливал заголовок. Позиционированные дети рисуются над ним. */
+.card > * { position: relative; }
+
+.icon {
+  display: grid;
+  place-items: center;
+  color: var(--danger);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+}
+
+.text {
+  color: var(--text-dim);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+}
+
+.actions {
+  width: 100%;
+  display: grid;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}

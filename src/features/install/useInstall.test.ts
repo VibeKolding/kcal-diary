@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { detectPlatform } from './useInstall'
+import { createInstallStore, detectPlatform } from './useInstall'
 
 function fakeBrowser(ua: string, opts: { touch?: number; standalone?: boolean } = {}) {
   vi.stubGlobal('navigator', {
@@ -49,5 +49,82 @@ describe('определение платформы', () => {
   it('видит, что приложение уже установлено', () => {
     fakeBrowser(IPHONE, { standalone: true })
     expect(detectPlatform()).toBe('installed')
+  })
+})
+
+/** Поддельное событие Chrome: обычное Event с prompt() и userChoice */
+function promptEvent(outcome: 'accepted' | 'dismissed' = 'accepted') {
+  const e = new Event('beforeinstallprompt', { cancelable: true })
+  const prompt = vi.fn(async () => {})
+  Object.assign(e, { prompt, userChoice: Promise.resolve({ outcome }) })
+  return { e, prompt }
+}
+
+describe('отложенное предложение установки', () => {
+  /**
+   * Главное, ради чего хранилище существует: Chrome присылает событие на
+   * заставке, когда карточки установки ещё нет. Оно не должно пропасть.
+   */
+  it('помнит событие, пришедшее до того, как кто-то подписался', () => {
+    const target = new EventTarget()
+    const store = createInstallStore(target)
+    const { e } = promptEvent()
+    target.dispatchEvent(e)
+
+    expect(e.defaultPrevented).toBe(true)
+    expect(store.getSnapshot().canPrompt).toBe(true)
+  })
+
+  it('сообщает подписчикам о новом событии и не меняет снимок без причины', () => {
+    const target = new EventTarget()
+    const store = createInstallStore(target)
+    const before = store.getSnapshot()
+    expect(store.getSnapshot()).toBe(before)
+
+    const listener = vi.fn()
+    store.subscribe(listener)
+    target.dispatchEvent(promptEvent().e)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(store.getSnapshot()).not.toBe(before)
+  })
+
+  it('вызывает prompt() один раз, даже если нажать дважды', async () => {
+    const target = new EventTarget()
+    const store = createInstallStore(target)
+    const { e, prompt } = promptEvent('dismissed')
+    target.dispatchEvent(e)
+
+    const [first, second] = await Promise.all([store.install(), store.install()])
+    expect(first).toBe('dismissed')
+    expect(second).toBe('unavailable')
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(store.getSnapshot().canPrompt).toBe(false)
+  })
+
+  it('если Chrome отказал показать окно, кнопка возвращается', async () => {
+    const target = new EventTarget()
+    const store = createInstallStore(target)
+    const { e, prompt } = promptEvent()
+    prompt.mockRejectedValueOnce(new DOMException('нужно касание', 'NotAllowedError'))
+    target.dispatchEvent(e)
+
+    expect(await store.install()).toBe('unavailable')
+    expect(store.getSnapshot().canPrompt).toBe(true)
+    expect(await store.install()).toBe('accepted')
+    expect(prompt).toHaveBeenCalledTimes(2)
+  })
+
+  it('без события установка недоступна', async () => {
+    const store = createInstallStore(new EventTarget())
+    expect(await store.install()).toBe('unavailable')
+  })
+
+  it('после установки кнопка пропадает, а карточка знает об установке', () => {
+    const target = new EventTarget()
+    const store = createInstallStore(target)
+    target.dispatchEvent(promptEvent().e)
+    target.dispatchEvent(new Event('appinstalled'))
+
+    expect(store.getSnapshot()).toEqual({ canPrompt: false, installed: true })
   })
 })

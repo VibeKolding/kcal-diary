@@ -12,6 +12,13 @@ interface ThemeCtx {
 
 const Ctx = createContext<ThemeCtx | null>(null)
 
+/** То, что возвращает startViewTransition: нам нужны только его промисы */
+interface Transition {
+  ready: Promise<void>
+  finished: Promise<void>
+  updateCallbackDone: Promise<void>
+}
+
 /**
  * Тема при запуске. Та же логика, что в public/theme.js: файл ставит атрибут
  * до первой отрисовки, а здесь то же значение попадает в состояние React.
@@ -49,11 +56,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Смена темы — кросс-фейд средствами браузера. Где View Transitions нет,
   // тема просто переключается сразу, как и раньше.
   const apply = useCallback((next: (t: Theme) => Theme) => {
-    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown }
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => Transition }
     const reduce = typeof matchMedia === 'function'
       && matchMedia('(prefers-reduced-motion: reduce)').matches
     if (doc.startViewTransition && !reduce) {
-      doc.startViewTransition(() => flushSync(() => setThemeState(next)))
+      const t = doc.startViewTransition(() => flushSync(() => setThemeState(next)))
+      // Два быстрых переключения — и первый переход браузер пропускает,
+      // отклоняя его промисы (AbortError; в свёрнутой вкладке — TimeoutError).
+      // Тема при этом уже сменилась, это не ошибка; без обработчика в
+      // консоль падал «Uncaught (in promise)» и мешал ловить настоящие.
+      t.ready.catch(() => {})
+      t.finished.catch(() => {})
+      t.updateCallbackDone.catch(() => {})
     } else {
       setThemeState(next)
     }

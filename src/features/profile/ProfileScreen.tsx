@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import {
-  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES, ageFrom, birthDateFromAge,
+  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES, ageFrom, targetsForProfile,
 } from '@/domain/targets'
-import type { Activity, Goal, Profile } from '@/domain/types'
+import type { Activity, Goal, Profile, Sex } from '@/domain/types'
 import { NumberField, parseNumber } from '@/ui/NumberField'
 import { setManualTargets, resetToAutoTargets, updateProfile, wipeEverything } from '@/db/profile'
 import { ReminderCard } from '@/features/reminders/ReminderCard'
@@ -16,38 +17,54 @@ import {
 } from '@/features/backup/backup'
 import { persistState, spaceReport, type PersistState, type SpaceReport } from '@/db/persist'
 import { InstallCard } from '@/features/install/InstallCard'
+import { useToast } from '@/ui/Toast'
 import { WeightCard } from './WeightCard'
 import { AboutCard } from './AboutCard'
+import { useDraft } from './useDraft'
+import { birthDateAfterEdit, checkNormForm, normFormFrom, normValuesFrom } from './norm'
+import { exportedText, restoredText } from './restore'
 import { useTheme } from '@/app/theme'
 import s from './ProfileScreen.module.css'
 
+/** Фокус на кнопку блока. Нужен, когда нажатая кнопка исчезает: иначе
+    фокус падает в body, и следующий Tab начинает с начала страницы. */
+function focusButton(box: HTMLElement | null, index: number) {
+  const buttons = box?.querySelectorAll('button')
+  buttons?.[index < 0 ? buttons.length + index : index]?.focus()
+}
+
 export function ProfileScreen({ profile }: { profile: Profile }) {
   const { theme, setTheme } = useTheme()
+  // Сообщения — тостом: раньше они выводились в карточке копии, и после
+  // «Сохранить норму» или «Записать вес» подтверждение оказывалось за экраном
+  const toast = useToast()
+  const say = (text: string) => toast({ text })
 
-  const [kcal, setKcal] = useState(String(profile.targets.kcal))
-  const [protein, setProtein] = useState(String(profile.targets.protein))
-  const [fat, setFat] = useState(String(profile.targets.fat))
-  const [carbs, setCarbs] = useState(String(profile.targets.carbs))
-  const [water, setWater] = useState(String(profile.waterGoalMl))
-  const [glass, setGlass] = useState(String(profile.glassMl ?? 250))
+  // Живой запрос: после восстановления из файла вес другой, и базовый
+  // обмен для предупреждения о норме должен считаться уже от него
+  const latest = useLiveQuery(() => latestWeight(), [])
+  const bmr = latest ? targetsForProfile(profile, latest.kg).bmr : null
+
+  const saved = normValuesFrom(profile)
+  const norm = useDraft(normFormFrom(saved))
+  const check = checkNormForm(norm.draft, saved, bmr)
+  const normChanged = check.targetsChanged || check.waterChanged
+  const normTitle = useRef<HTMLSpanElement>(null)
+
   const [wipe, setWipe] = useState(false)
-
-  useEffect(() => {
-    setKcal(String(profile.targets.kcal))
-    setProtein(String(profile.targets.protein))
-    setFat(String(profile.targets.fat))
-    setCarbs(String(profile.targets.carbs))
-    setWater(String(profile.waterGoalMl))
-    setGlass(String(profile.glassMl ?? 250))
-  }, [profile])
+  const wipeBox = useRef<HTMLDivElement>(null)
+  const wipeToggled = useRef(false)
 
   const [stale, setStale] = useState(false)
   const [lastBackup, setLastBackup] = useState<number | null>(null)
   const [persist, setPersist] = useState<PersistState | null>(null)
   const [space, setSpace] = useState<SpaceReport | null>(null)
   const [undoAt, setUndoAt] = useState<number | null>(null)
-  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null)
+  // Состояние копии перечитывается после каждого действия с ней
+  const [backupTick, setBackupTick] = useState(0)
+  const refreshBackup = () => setBackupTick((t) => t + 1)
   const fileRef = useRef<HTMLInputElement>(null)
+  const backupActions = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void backupIsStale().then(setStale)
@@ -55,46 +72,115 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
     void persistState().then(setPersist)
     void spaceReport().then(setSpace)
     void restorePointAt().then(setUndoAt)
-  }, [message])
+  }, [backupTick])
 
-  async function saveTargets() {
-    await setManualTargets({
-      kcal: Number(kcal) || profile.targets.kcal,
-      protein: Number(protein) || 0,
-      fat: Number(fat) || 0,
-      carbs: Number(carbs) || 0,
-    })
-    await updateProfile({
-      waterGoalMl: Number(water) || profile.waterGoalMl,
-      glassMl: Math.min(1000, Math.max(50, Number(glass) || 250)),
-    })
-    setMessage({ text: 'Норма сохранена. Авторасчёт отключён.' })
+  // Открыли подтверждение стирания — фокус на безопасную «Оставить»,
+  // закрыли — обратно на «Удалить все данные…». Обе последние в блоке.
+  useEffect(() => {
+    if (!wipeToggled.current) return
+    wipeToggled.current = false
+    focusButton(wipeBox.current, -1)
+  }, [wipe])
+
+  function toggleWipe(next: boolean) {
+    wipeToggled.current = true
+    setWipe(next)
+  }
+
+  /*
+   * Вода и стакан — не норма еды. Раньше одна кнопка писала всё через
+   * setManualTargets, и смена стакана с 250 на 300 мл молча выключала
+   * авторасчёт: вес переставал менять норму калорий. Теперь норма
+   * становится ручной, только если правили калории или БЖУ.
+   */
+  async function saveNorm() {
+    const v = check.values
+    if (!v || !normChanged) return
+    if (check.targetsChanged) {
+      await setManualTargets({ kcal: v.kcal, protein: v.protein, fat: v.fat, carbs: v.carbs })
+    }
+    if (check.waterChanged) {
+      await updateProfile({ waterGoalMl: v.water, glassMl: v.glass })
+    }
+    // Поля приводятся к сохранённому виду («02000» → «2000»), иначе форма
+    // осталась бы «тронутой» и перестала бы следить за профилем
+    norm.replace(normFormFrom(v))
+    if (check.targetsChanged) {
+      say(profile.targetsManual ? 'Норма сохранена.' : 'Норма сохранена. Авторасчёт отключён.')
+    } else if (v.water !== saved.water && !profile.targetsManual) {
+      say('Сохранено. При следующем взвешивании вода снова посчитается от веса.')
+    } else {
+      say('Сохранено.')
+    }
   }
 
   async function backToAuto() {
     const w = await latestWeight()
-    if (!w) return
+    if (!w) {
+      say('Сначала запишите вес: норма считается от него.')
+      return
+    }
+    // Черновик сбрасывается, чтобы поля пошли за пересчитанной нормой
+    norm.reset()
     await resetToAutoTargets(w.kg)
-    setMessage({ text: 'Норма пересчитана по анкете.' })
+    // Кнопка сейчас исчезнет, а «Сохранить норму» погашена: нечего
+    // сохранять. Фокус встаёт на заголовок карточки, следующий Tab — в поля.
+    normTitle.current?.focus()
+    say('Норма пересчитана по анкете.')
   }
 
   async function doExport() {
-    await exportBackup()
-    setMessage({ text: 'Копия сохранена в загрузки.' })
+    try {
+      const text = exportedText(await exportBackup())
+      if (text) say(text)
+    } catch {
+      toast({ text: 'Не получилось сохранить копию. Попробуйте ещё раз.', duration: 6000 })
+    }
+    refreshBackup()
+  }
+
+  async function doExportCsv() {
+    try {
+      const text = exportedText(await exportCsv(), 'Таблица')
+      if (text) say(text)
+    } catch {
+      toast({ text: 'Не получилось сохранить таблицу. Попробуйте ещё раз.', duration: 6000 })
+    }
   }
 
   async function doImport(file: File) {
     try {
       const res = await importBackup(file)
-      setMessage({
-        text: `Восстановлено: ${res.entries} записей, ${res.foods} продуктов, ${res.weights} взвешиваний.`,
-      })
+      // Прежний дневник не поместился в точку возврата — отменить нельзя,
+      // и человек должен узнать об этом сейчас, а не когда захочет вернуть
+      toast(res.undo === 'too-big'
+        ? {
+            text: `Восстановлено: ${restoredText(res)}. Прежний дневник был слишком большим, вернуть его не получится.`,
+            duration: 8000,
+          }
+        : { text: `Восстановлено: ${restoredText(res)}.` })
     } catch (e) {
-      setMessage({
+      toast({
         text: e instanceof BackupError ? e.message : 'Не удалось прочитать файл.',
-        error: true,
+        duration: 6000,
       })
     }
+    refreshBackup()
+  }
+
+  async function doUndo() {
+    try {
+      const r = await undoRestore()
+      // Кнопка «Вернуть как было» исчезнет — фокус на «Восстановить из файла»
+      focusButton(backupActions.current, 1)
+      say(`Вернули как было: ${restoredText(r)}.`)
+    } catch (e) {
+      toast({
+        text: e instanceof BackupError ? e.message : 'Не получилось вернуть.',
+        duration: 6000,
+      })
+    }
+    refreshBackup()
   }
 
   return (
@@ -133,23 +219,44 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
 
       <Glass>
         <div className={s.cardHead}>
-          <span className={s.cardTitle}>Норма на день</span>
+          <span ref={normTitle} tabIndex={-1} className={s.cardTitle}>Норма на день</span>
           <span className={s.cardHint}>
             {profile.targetsManual ? 'задана вручную' : 'авторасчёт'}
           </span>
         </div>
 
         <div className={s.quad}>
-          <NumberField label="Калории" size="md" value={kcal} onChange={setKcal} />
-          <NumberField label="Вода, мл" size="md" value={water} onChange={setWater} />
-          <NumberField label="Белки, г" size="md" value={protein} onChange={setProtein} />
-          <NumberField label="Жиры, г" size="md" value={fat} onChange={setFat} />
-          <NumberField label="Углеводы, г" size="md" value={carbs} onChange={setCarbs} />
-          <NumberField label="Стакан, мл" size="md" value={glass} onChange={setGlass} />
+          <NumberField label="Калории" size="md" value={norm.draft.kcal}
+            onChange={(v) => norm.set('kcal', v)} error={check.errors.kcal} />
+          <NumberField label="Вода, мл" size="md" value={norm.draft.water}
+            onChange={(v) => norm.set('water', v)} error={check.errors.water} />
+          <NumberField label="Белки, г" size="md" value={norm.draft.protein}
+            onChange={(v) => norm.set('protein', v)} error={check.errors.protein} />
+          <NumberField label="Жиры, г" size="md" value={norm.draft.fat}
+            onChange={(v) => norm.set('fat', v)} error={check.errors.fat} />
+          <NumberField label="Углеводы, г" size="md" value={norm.draft.carbs}
+            onChange={(v) => norm.set('carbs', v)} error={check.errors.carbs} />
+          <NumberField label="Стакан, мл" size="md" value={norm.draft.glass}
+            onChange={(v) => norm.set('glass', v)} error={check.errors.glass} />
         </div>
 
+        {check.belowBmr && bmr !== null && (
+          <p className={`${s.note} ${s.warn}`} style={{ marginTop: 'var(--s3)' }}>
+            Это ниже базового обмена ({bmr} ккал) — столько организм тратит
+            в покое. Такую норму лучше согласовать с врачом.
+          </p>
+        )}
+        {check.overKcal !== null && (
+          <p className={`${s.note} ${s.warn}`} style={{ marginTop: 'var(--s3)' }}>
+            Белки и жиры сами дают {check.overKcal} ккал — больше нормы калорий.
+            Уменьшите их или поднимите норму.
+          </p>
+        )}
+
         <div className={s.actions} style={{ marginTop: 'var(--s4)' }}>
-          <Pill block onClick={saveTargets}>Сохранить норму</Pill>
+          <Pill block disabled={!check.values || !normChanged} onClick={saveNorm}>
+            Сохранить норму
+          </Pill>
           {profile.targetsManual && (
             <Pill block variant="ghost" onClick={backToAuto}>
               Вернуть авторасчёт по анкете
@@ -158,9 +265,9 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
         </div>
       </Glass>
 
-      <WeightCard profile={profile} onSaved={(text) => setMessage({ text })} />
+      <WeightCard profile={profile} onSaved={say} />
 
-      <ProfileForm profile={profile} onSaved={(text) => setMessage({ text })} />
+      <ProfileForm profile={profile} onSaved={say} />
 
       <ReminderCard />
 
@@ -177,7 +284,7 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
         <p className={`${s.note} ${stale ? s.warn : ''}`} style={{ marginBottom: 'var(--s4)' }}>
           {stale
             ? 'Копии больше недели нет. Данные хранятся только в этом браузере — очистка сайта сотрёт дневник без возможности восстановления.'
-            : 'Данные хранятся только на этом устройстве. Скачанный файл — единственный способ перенести дневник на другой телефон.'}
+            : 'Данные хранятся только на этом устройстве. Файл копии — единственный способ перенести дневник на другой телефон.'}
         </p>
 
         {/* Честная строка о том, переживут ли данные нехватку места.
@@ -204,25 +311,20 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
           </p>
         )}
 
-        <div className={s.actions}>
-          <Pill block onClick={doExport}>Скачать копию</Pill>
+        <div ref={backupActions} className={s.actions}>
+          {/* «Сохранить», а не «Скачать»: на телефоне копия уходит через окно
+              «Поделиться» — в iCloud Drive, Google Drive, Telegram */}
+          <Pill block onClick={doExport}>Сохранить копию</Pill>
           <Pill block variant="ghost" onClick={() => fileRef.current?.click()}>
             Восстановить из файла
           </Pill>
           {undoAt !== null && (
-            <Pill block variant="ghost" onClick={async () => {
-              try {
-                const r = await undoRestore()
-                setMessage({ text: `Вернули как было: ${r.entries} записей.` })
-              } catch (e) {
-                setMessage({ text: e instanceof BackupError ? e.message : 'Не получилось вернуть.', error: true })
-              }
-            }}>
+            <Pill block variant="ghost" onClick={doUndo}>
               Вернуть как было (до {new Date(undoAt).toLocaleDateString('ru-RU')})
             </Pill>
           )}
-          <Pill block variant="quiet" onClick={async () => { await exportCsv(); setMessage({ text: 'Таблица сохранена в загрузки.' }) }}>
-            Скачать таблицу CSV
+          <Pill block variant="quiet" onClick={doExportCsv}>
+            Сохранить таблицу CSV
           </Pill>
           <input
             ref={fileRef} className={s.hidden} type="file" accept="application/json,.json"
@@ -233,12 +335,6 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
             }}
           />
         </div>
-
-        {message && (
-          <p className={`${s.note} ${message.error ? s.warn : s.ok}`} style={{ marginTop: 'var(--s3)' }}>
-            {message.text}
-          </p>
-        )}
       </Glass>
       <Glass>
         <div className={s.cardHead}>
@@ -246,18 +342,20 @@ export function ProfileScreen({ profile }: { profile: Profile }) {
         </div>
         <p className={s.note} style={{ marginBottom: 'var(--s3)' }}>
           Дневник, продукты, рецепты, вес и настройки на этом устройстве. Резервная
-          копия, если вы её скачали, останется в загрузках.
+          копия, если вы её сохраняли, не пострадает: она лежит отдельно.
         </p>
-        {wipe ? (
-          <div className={s.actions}>
-            <Pill block className={s.dangerBtn} onClick={async () => { await wipeEverything(); location.replace('/') }}>
-              Да, удалить безвозвратно
-            </Pill>
-            <Pill block variant="ghost" onClick={() => setWipe(false)}>Оставить</Pill>
-          </div>
-        ) : (
-          <Pill block variant="ghost" onClick={() => setWipe(true)}>Удалить все данные…</Pill>
-        )}
+        <div ref={wipeBox}>
+          {wipe ? (
+            <div className={s.actions}>
+              <Pill block className={s.dangerBtn} onClick={async () => { await wipeEverything(); location.replace('/') }}>
+                Да, удалить безвозвратно
+              </Pill>
+              <Pill block variant="ghost" onClick={() => toggleWipe(false)}>Оставить</Pill>
+            </div>
+          ) : (
+            <Pill block variant="ghost" onClick={() => toggleWipe(true)}>Удалить все данные…</Pill>
+          )}
+        </div>
       </Glass>
 
       <AboutCard />
@@ -277,21 +375,35 @@ function ProfileForm({
   profile, onSaved,
 }: { profile: Profile; onSaved: (text: string) => void }) {
   const [open, setOpen] = useState(false)
-  const [age, setAge] = useState(String(ageFrom(profile.birthDate)))
-  const [height, setHeight] = useState(String(profile.heightCm))
-  const [activity, setActivity] = useState<Activity>(profile.activity)
-  const [goal, setGoal] = useState<Goal>(profile.goal)
-  const [rate, setRate] = useState(profile.ratePerWeek)
-  const [sex, setSex] = useState(profile.sex)
+  const form = useDraft<{
+    sex: Sex; age: string; height: string; activity: Activity; goal: Goal; rate: number
+  }>({
+    sex: profile.sex,
+    age: String(ageFrom(profile.birthDate)),
+    height: String(profile.heightCm),
+    activity: profile.activity,
+    goal: profile.goal,
+    rate: profile.ratePerWeek,
+  })
+  const { sex, age, height, activity, goal, rate } = form.draft
+  // «Изменить» и «Отмена» стоят на одном месте и сменяют друг друга:
+  // после переключения фокус переходит на ту, что появилась
+  const headBtn = useRef<HTMLButtonElement>(null)
+  const toggled = useRef(false)
 
   useEffect(() => {
-    setAge(String(ageFrom(profile.birthDate)))
-    setHeight(String(profile.heightCm))
-    setActivity(profile.activity)
-    setGoal(profile.goal)
-    setRate(profile.ratePerWeek)
-    setSex(profile.sex)
-  }, [profile])
+    if (!toggled.current) return
+    toggled.current = false
+    headBtn.current?.focus()
+  }, [open])
+
+  function toggle(next: boolean) {
+    // Открываем с сохранёнными значениями: брошенная в прошлый раз правка
+    // не должна всплыть через неделю
+    if (next) form.reset()
+    toggled.current = true
+    setOpen(next)
+  }
 
   const ageValue = parseNumber(age)
   const heightValue = parseNumber(height)
@@ -302,16 +414,16 @@ function ProfileForm({
   const valid = ageValue !== null && heightValue !== null && !ageError && !heightError
 
   function pickGoal(next: Goal) {
-    setGoal(next)
+    form.set('goal', next)
     const rates = GOAL_RATES[next]
-    if (!rates.includes(rate)) setRate(rates[Math.min(1, rates.length - 1)]!)
+    if (!rates.includes(rate)) form.set('rate', rates[Math.min(1, rates.length - 1)]!)
   }
 
   async function save() {
     if (!valid) return
     await updateProfile({
       sex,
-      birthDate: birthDateFromAge(ageValue),
+      birthDate: birthDateAfterEdit(profile.birthDate, ageValue),
       heightCm: heightValue,
       activity,
       goal,
@@ -320,10 +432,14 @@ function ProfileForm({
     // Норму пересчитываем от актуального веса, если её не задавали руками
     const w = await latestWeight()
     if (w && !profile.targetsManual) await resetToAutoTargets(w.kg)
-    setOpen(false)
+    toggle(false)
     onSaved(profile.targetsManual
       ? 'Анкета сохранена. Норма задана вручную, поэтому не изменилась.'
-      : 'Анкета сохранена, норма пересчитана.')
+      : w
+        ? 'Анкета сохранена, норма пересчитана.'
+        // Без взвешиваний (копия без веса) пересчитывать не от чего —
+        // и писать «пересчитана» было бы неправдой
+        : 'Анкета сохранена. Норма пересчитается, когда вы запишете вес.')
   }
 
   if (!open) {
@@ -331,7 +447,7 @@ function ProfileForm({
       <Glass>
         <div className={s.cardHead}>
           <span className={s.cardTitle}>Анкета</span>
-          <button className={s.editBtn} onClick={() => setOpen(true)}>Изменить</button>
+          <button ref={headBtn} className={s.editBtn} onClick={() => toggle(true)}>Изменить</button>
         </div>
         <div className={s.rows}>
           <div className={s.row}>
@@ -366,7 +482,7 @@ function ProfileForm({
     <Glass accent>
       <div className={s.cardHead}>
         <span className={s.cardTitle}>Анкета</span>
-        <button className={s.editBtn} onClick={() => setOpen(false)}>Отмена</button>
+        <button ref={headBtn} className={s.editBtn} onClick={() => toggle(false)}>Отмена</button>
       </div>
 
       <div className={s.editForm}>
@@ -374,18 +490,20 @@ function ProfileForm({
           <button
             type="button" role="radio" aria-checked={sex === 'male'}
             className={`${s.segItem} ${sex === 'male' ? s.segItemOn : ''}`}
-            onClick={() => setSex('male')}
+            onClick={() => form.set('sex', 'male')}
           >Мужской</button>
           <button
             type="button" role="radio" aria-checked={sex === 'female'}
             className={`${s.segItem} ${sex === 'female' ? s.segItemOn : ''}`}
-            onClick={() => setSex('female')}
+            onClick={() => form.set('sex', 'female')}
           >Женский</button>
         </div>
 
         <div className={s.quad}>
-          <NumberField label="Возраст" unit="лет" value={age} onChange={setAge} error={ageError} />
-          <NumberField label="Рост" unit="см" value={height} onChange={setHeight} error={heightError} />
+          <NumberField label="Возраст" unit="лет" value={age}
+            onChange={(v) => form.set('age', v)} error={ageError} />
+          <NumberField label="Рост" unit="см" value={height}
+            onChange={(v) => form.set('height', v)} error={heightError} />
         </div>
 
         <div className={s.field}>
@@ -395,7 +513,7 @@ function ProfileForm({
               <button
                 key={k} type="button" role="radio" aria-checked={activity === k}
                 className={`${s.option} ${activity === k ? s.optionOn : ''}`}
-                onClick={() => setActivity(k)}
+                onClick={() => form.set('activity', k)}
               >{ACTIVITY_LABELS[k].title}</button>
             ))}
           </div>
@@ -422,7 +540,7 @@ function ProfileForm({
                 <button
                   key={r} type="button"
                   className={`${s.option} ${rate === r ? s.optionOn : ''} num`}
-                  onClick={() => setRate(r)}
+                  onClick={() => form.set('rate', r)}
                 >{r}</button>
               ))}
             </div>

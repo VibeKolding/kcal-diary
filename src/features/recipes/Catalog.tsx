@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import { Chip, ChipRow } from '@/ui/Chip'
@@ -24,6 +24,17 @@ import {
 import s from './Catalog.module.css'
 
 /**
+ * Фильтры каталога на время просмотра блюда.
+ *
+ * Карточка закрывает панель добавления, а закрытая панель размонтирует
+ * каталог вместе с его состоянием: без этого запаса человек возвращался бы
+ * к цели из профиля, к завтракам и к началу списка. Запас пишется только
+ * при открытии блюда и забирается первым же показом каталога, поэтому новый
+ * заход в «Добавить еду» по-прежнему начинается с цели пользователя.
+ */
+let resume: { goal: RecipeGoal; meal: RecipeMeal; onlyFav: boolean; openedId: string } | null = null
+
+/**
  * Каталог блюд внутри экрана добавления еды.
  *
  * Открытое блюдо держит РОДИТЕЛЬ, а не этот компонент. Карточка рецепта —
@@ -35,20 +46,39 @@ export function CatalogBrowser({ profile, onOpen }: {
   profile: Profile
   onOpen: (recipe: CatalogRecipe) => void
 }) {
+  // Читается при первом рендере, а стирается в эффекте: в StrictMode
+  // инициализатор вызывается дважды, и второй вызов не должен найти пустоту
+  const [back] = useState(() => resume)
+  useEffect(() => { resume = null }, [])
+
   // Каталог открывается на цели пользователя: чаще всего именно она ему и нужна
-  const [goal, setGoal] = useState<RecipeGoal>(profile.goal)
-  const [meal, setMeal] = useState<RecipeMeal>(currentMeal())
+  const [goal, setGoal] = useState<RecipeGoal>(back?.goal ?? profile.goal)
+  const [meal, setMeal] = useState<RecipeMeal>(back?.meal ?? currentMeal())
   const [all, setAll] = useState<CatalogRecipe[]>([])
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [onlyFav, setOnlyFav] = useState(false)
+  const [onlyFav, setOnlyFav] = useState(back?.onlyFav ?? false)
   const favIds = useLiveQuery(() => favoriteIds('recipe'), []) ?? []
+  const openedRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     loadCatalog()
       .then((rows) => { setAll(rows); setLoaded(true) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Не удалось загрузить рецепты'))
   }, [])
+
+  // После возврата из карточки список стоит на том блюде, которое смотрели,
+  // и фокус там же — клавиатура не начинает обход панели заново
+  useEffect(() => {
+    if (!loaded || !openedRef.current) return
+    openedRef.current.scrollIntoView({ block: 'center' })
+    openedRef.current.focus({ preventScroll: true })
+  }, [loaded])
+
+  function openDish(recipe: CatalogRecipe) {
+    resume = { goal, meal, onlyFav, openedId: recipe.id }
+    onOpen(recipe)
+  }
 
   // Избранное — поверх фильтров: звёздочку ставят, чтобы не искать заново
   const shown = useMemo(
@@ -102,7 +132,10 @@ export function CatalogBrowser({ profile, onOpen }: {
       <div className={s.list}>
         {shown.map((r, i) => (
           <Glass key={r.id} padding="none" className="rise-in" style={{ '--i': i } as CSSProperties}>
-            <button className={`${s.card} pressable`} onClick={() => onOpen(r)}>
+            <button
+              ref={r.id === back?.openedId ? openedRef : undefined}
+              className={`${s.card} pressable`} onClick={() => openDish(r)}
+            >
               <span className={s.cover}>
                 <DishArt
                   tokens={dishTokens(r)} bowl={isBowl(r)}
@@ -167,13 +200,28 @@ export function RecipeSheet({ recipe, defaultMeal, date, onClose, onAdded }: {
   const [grams, setGrams] = useState(100)
   const [meal, setMeal] = useState<Meal>('lunch')
   const [saved, setSaved] = useState(false)
+  // Пауза, чтобы увидеть «Записано», перед закрытием. Панель живёт дольше
+  // одного блюда, и таймер не должен дотянуться до следующего открытия
+  const closeTimer = useRef(0)
+  const current = useRef(recipe)
 
   useEffect(() => {
+    current.current = recipe
+    clearTimeout(closeTimer.current)
     if (!recipe) return
     setGrams(portionGrams(recipe))
     setMeal(defaultMeal ?? recipe.meal)
     setSaved(false)
   }, [recipe, defaultMeal])
+
+  useEffect(() => () => clearTimeout(closeTimer.current), [])
+
+  // Стабильная ссылка: панель заново навешивает фокус и inert при каждой
+  // смене onClose, и выбор порции не должен выдёргивать фокус из чипа
+  const close = useCallback(() => {
+    clearTimeout(closeTimer.current)
+    onClose()
+  }, [onClose])
 
   const shown = useLast(recipe)
   if (!shown) return null
@@ -184,17 +232,24 @@ export function RecipeSheet({ recipe, defaultMeal, date, onClose, onAdded }: {
     if (!shown) return
     await addCatalogEntry(shown, grams, meal, date ?? dayKey())
     tap()
+    // Пока шла запись, карточку могли закрыть — тогда закрывать уже нечего
+    if (current.current !== shown) return
     setSaved(true)
-    setTimeout(() => (onAdded ?? onClose)(), 550)
+    closeTimer.current = window.setTimeout(() => {
+      // Блюдо записано, и панель добавления уходит целиком: следующий
+      // заход в каталог начинается с цели пользователя, а не с этого блюда
+      resume = null
+      ;(onAdded ?? onClose)()
+    }, 550)
   }
 
   return (
     <Sheet
-      open={recipe !== null} title="Рецепт" onClose={onClose}
+      open={recipe !== null} title="Рецепт" onClose={close}
       actions={(
         <span className={s.sheetActions}>
           <StarButton kind="recipe" id={shown.id} />
-          <button className={`${s.closeBtn} pressable`} onClick={onClose} aria-label="Закрыть">
+          <button className={`${s.closeBtn} pressable`} onClick={close} aria-label="Закрыть">
             <Icon name="close" size={16} />
           </button>
         </span>

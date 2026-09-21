@@ -49,7 +49,8 @@
 .label { composes: t-caps from global; }
 
 
-.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
+/* align-items: start — ошибка под ростом не сдвигает рамку веса */
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); align-items: start; }
 
 /* --- Карточки выбора --- */
 .options { display: grid; gap: var(--s2); }
@@ -123,10 +124,24 @@
 
 .warn { color: var(--danger); }
 
+/* Зона касания 44 px, как у всех кнопок, хоть с виду это ссылка */
 .linkBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-md);
+  padding: 0 var(--s2);
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-dim);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* Переезд с другого телефона — внизу первого шага, над кнопкой «Дальше» */
+.restore {
+  margin-top: auto;
+  display: grid;
+  justify-items: center;
+  gap: var(--s1);
+  text-align: center;
 }

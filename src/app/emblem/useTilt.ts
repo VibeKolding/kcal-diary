@@ -14,6 +14,11 @@ const MAX = 12
  * Гироскоп на iOS требует разрешения, и спросить его можно только из
  * жеста — поэтому просим при первом касании заставки, а до этого молчим.
  * При отключённом движении в системе кадр приходит один раз с нулями.
+ *
+ * deviceorientation работает, только если Permissions-Policy разрешает
+ * странице accelerometer и gyroscope (а для абсолютной ориентации ещё и
+ * magnetometer). Заголовок живёт в четырёх местах — src/app/securityHeaders.ts
+ * и копии для хостингов; запрет в одном из них молча отключал наклон.
  */
 export function useTilt(enabled: boolean, onFrame: (t: Tilt) => void): void {
   const cb = useRef(onFrame)
@@ -52,25 +57,34 @@ export function useTilt(enabled: boolean, onFrame: (t: Tilt) => void): void {
       target.x = Math.max(-MAX, Math.min(MAX, (45 - e.beta) * 0.6))
       target.y = Math.max(-MAX, Math.min(MAX, e.gamma * 0.6))
     }
-    const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }
+    // Интерфейса может не быть вовсе (урезанные сборки, старые встроенные
+    // браузеры). Обращение к несуществующему имени — ReferenceError, и
+    // раньше заставка роняла всё приложение в белый экран на каждом запуске.
+    const D = typeof DeviceOrientationEvent === 'undefined'
+      ? null
+      : DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }
+    // Диалог iOS «Доступ к движению» может висеть дольше заставки. Если
+    // она ушла раньше ответа, подписка после него пережила бы очистку.
+    let alive = true
     const askOrientation = async () => {
       try {
-        if (typeof D.requestPermission === 'function' && await D.requestPermission() !== 'granted') return
-        window.addEventListener('deviceorientation', onOrient)
+        if (typeof D?.requestPermission === 'function' && await D.requestPermission() !== 'granted') return
+        if (alive) window.addEventListener('deviceorientation', onOrient)
       } catch { /* нет гироскопа — остаётся палец */ }
     }
 
     window.addEventListener('pointermove', onPointer)
     window.addEventListener('pointerleave', onLeave)
     window.addEventListener('pointerup', onLeave)
-    if (typeof D.requestPermission === 'function') {
+    if (typeof D?.requestPermission === 'function') {
       window.addEventListener('pointerdown', askOrientation, { once: true })
-    } else {
+    } else if (D) {
       // Android даёт события без разрешения — подключаем сразу
       window.addEventListener('deviceorientation', onOrient)
     }
 
     return () => {
+      alive = false
       cancelAnimationFrame(raf)
       window.removeEventListener('pointermove', onPointer)
       window.removeEventListener('pointerleave', onLeave)

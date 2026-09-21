@@ -93,11 +93,19 @@
 
 .noteBlock { display: grid; }
 .noteSave {
+  position: relative;
   display: grid; place-items: center;
   width: 30px; height: 30px; flex: none;
   border-radius: 50%;
   background: var(--contrast-fill);
   color: var(--contrast-text);
+}
+/* Кружок маленький, чтобы не распирать поле, а зона касания — полные 44 px */
+.noteSave::after {
+  content: '';
+  position: absolute;
+  inset: calc((30px - var(--h-md)) / 2);
+  border-radius: 50%;
 }
 
 .overBadge {
@@ -161,13 +169,17 @@
   gap: var(--s3);
 }
 .emptyText { font-size: var(--fs-md); color: var(--text-faint); }
+/* День ещё читается: строка держит место, но «Пока пусто» не мелькает */
+.pending { visibility: hidden; }
 .mealActions { display: flex; gap: var(--s1); flex: none; }
 
+/* Строка-ссылка, но пальцем в неё попадают как в кнопку: высота 44.
+   Отступ сверху съеден этой высотой — текст стоит там же, где стоял */
 .addLine {
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
-  margin-top: var(--s3);
+  min-height: var(--h-md);
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-dim);
@@ -193,4 +205,28 @@
   font-size: var(--fs-sm);
   line-height: 1.4;
   color: var(--text-dim);
+}
+
+/* Карточка «Где хранится дневник»: тот же тихий язык, что у напоминания
+   о копии, только в столбик — текста больше, и кнопок две */
+.notice {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s4);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass);
+}
+
+.noticeTitle {
+  font-family: var(--font-display);
+  font-size: var(--fs-ui);
+  font-weight: 700;
+}
+
+.noticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s1);
 }

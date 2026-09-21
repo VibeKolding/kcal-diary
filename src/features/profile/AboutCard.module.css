@@ -23,3 +23,22 @@
   line-height: 1.55;
   margin-top: var(--s4);
 }
+.note + .note { margin-top: var(--s2); }
+
+/* Атрибуция, оговорка и права — мелко, но читаемо */
+.legal {
+  display: grid;
+  gap: var(--s1);
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--glass-border-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.link {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

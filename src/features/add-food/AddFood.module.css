@@ -13,6 +13,28 @@
 }
 .search:focus-within { border-color: var(--glass-border); }
 
+/* Поле с лупой — label: касание по лупе тоже ставит курсор в поле */
+.searchField {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 100%;
+}
+
+/* Крестик очистки: значок прежний, зона касания — 44 px. Отрицательный
+   отступ съедает её лишнюю ширину, чтобы значок не отъехал от края */
+.clear {
+  display: grid;
+  place-items: center;
+  width: var(--h-md);
+  height: var(--h-md);
+  margin-right: calc(var(--s3) * -1);
+  flex: none;
+  border-radius: 50%;
+}
+
 .searchInput {
   flex: 1;
   min-width: 0;
@@ -57,6 +79,7 @@
 .quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
 
 .hint { font-size: var(--fs-sm); color: var(--text-faint); line-height: 1.5; }
+.error { font-size: var(--fs-sm); font-weight: 600; color: var(--danger); line-height: 1.5; }
 
 .chipStar { color: var(--gold-1); fill: currentColor; }
 [data-theme='light'] .chipStar { color: var(--gold-2); }
@@ -74,9 +97,12 @@
   margin-top: var(--s2);
 }
 
+/* Текстовая кнопка, но высотой с настоящую: 17 px пальцем не поймать */
 .addMacros {
   justify-self: start;
-  margin-top: var(--s1);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-md);
   padding: 0;
   font-size: var(--fs-sm);
   font-weight: 700;

@@ -10,26 +10,40 @@ import { useLast } from '@/ui/useLast'
 import { StarButton } from '@/ui/StarButton'
 import { Icon } from '@/ui/Icon'
 import { tap } from '@/ui/haptic'
+import { GramsInput } from '@/features/today/GramsInput'
+import { gramsDraft, parseGrams } from '@/features/today/grams'
+import { useSave } from '@/features/today/useSave'
 import s from '@/features/today/EntrySheet.module.css'
 
 interface Props {
   food: Food | null
   onClose: () => void
+  /** Запись в дневник. Если бросит, панель останется открытой, а тост скажет почему */
   onConfirm: (food: Food, grams: number) => void | Promise<void>
 }
 
 /** Выбор порции: чипы готовых мер плюс слайдер граммов */
 export function PortionSheet({ food, onClose, onConfirm }: Props) {
-  const [grams, setGrams] = useState(100)
+  const [draft, setDraft] = useState('100')
+  const { pending, run } = useSave()
 
   useEffect(() => {
-    if (food) setGrams(food.servings[0]?.grams ?? 100)
+    if (food) setDraft(gramsDraft(food.servings[0]?.grams ?? 100))
   }, [food])
 
   const shown = useLast(food)
   if (!shown) return null
 
-  const n = scale(shown.per100, grams)
+  const grams = parseGrams(draft)
+  const n = scale(shown.per100, grams ?? 0)
+
+  function confirm() {
+    if (!shown || grams === null) return
+    void run(async () => {
+      await onConfirm(shown, grams)
+      tap()
+    })
+  }
 
   return (
     <Sheet
@@ -56,31 +70,13 @@ export function PortionSheet({ food, onClose, onConfirm }: Props) {
 
         <ChipRow>
           {shown.servings.map((sv) => (
-            <Chip key={sv.name} active={grams === sv.grams} onClick={() => setGrams(sv.grams)}>
+            <Chip key={sv.name} active={grams === sv.grams} onClick={() => setDraft(gramsDraft(sv.grams))}>
               {sv.name}
             </Chip>
           ))}
         </ChipRow>
 
-        <div>
-          <div className={s.gramsRow}>
-            <input
-              className={s.gramsInput}
-              type="number" inputMode="numeric" min={1} max={3000}
-              value={grams}
-              onChange={(e) => setGrams(Math.max(1, Number(e.target.value) || 0))}
-            />
-            <span className={s.unit}>граммов</span>
-          </div>
-          <input
-            className={s.slider}
-            type="range" min={5} max={600} step={5}
-            value={Math.min(grams, 600)}
-            onChange={(e) => setGrams(Number(e.target.value))}
-            style={{ marginTop: 'var(--s4)' }}
-            aria-label="Вес порции"
-          />
-        </div>
+        <GramsInput value={draft} onChange={setDraft} />
 
         <Glass flat>
           <div className={s.grid}>
@@ -103,7 +99,7 @@ export function PortionSheet({ food, onClose, onConfirm }: Props) {
           </div>
         </Glass>
 
-        <Pill block onClick={() => { tap(); void onConfirm(shown, grams) }}>
+        <Pill block disabled={pending || grams === null} onClick={confirm}>
           Добавить в дневник
         </Pill>
       </div>

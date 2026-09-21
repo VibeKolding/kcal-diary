@@ -1,7 +1,8 @@
 import type { Nutrients, Profile } from '@/domain/types'
-import { calcTargets, type TargetInput } from '@/domain/targets'
+import { calcTargets, waterGoalFor, type TargetInput } from '@/domain/targets'
 import { db, setMeta, META } from './db'
 import { putWeight } from './tracking'
+import { ensurePersistentStorage } from './persist'
 import { dayKey } from '@/domain/dates'
 
 /**
@@ -40,12 +41,12 @@ export async function createProfile(input: OnboardingInput): Promise<Profile> {
   await putWeight({ date: dayKey(), kg: input.weightKg })
   await setMeta(META.onboarded, true)
 
-  // Данные живут только здесь, поэтому просим браузер их не вытеснять
-  try {
-    await navigator.storage?.persist?.()
-  } catch {
-    // не поддерживается — не страшно, спасает ручной бэкап
-  }
+  // Данные появились — самое время повторить просьбу не вытеснять их.
+  // Через ensurePersistentStorage, а не голым persist(): просить можно
+  // только у установленного приложения, во вкладке часть браузеров
+  // показала бы окно разрешения на пустом месте (см. persist.ts).
+  // Без await: ответа браузера не ждёт ни анкета, ни ручная норма после неё.
+  void ensurePersistentStorage().catch(() => undefined)
   return profile
 }
 
@@ -73,7 +74,7 @@ export async function resetToAutoTargets(weightKg: number): Promise<Nutrients | 
   // Вода тоже идёт от веса: раньше она считалась один раз в онбординге
   // и дальше жила своей жизнью
   await db.profile.update(1, {
-    targets, targetsManual: false, waterGoalMl: Math.round(weightKg * 30),
+    targets, targetsManual: false, waterGoalMl: waterGoalFor(weightKg),
   })
   return targets
 }

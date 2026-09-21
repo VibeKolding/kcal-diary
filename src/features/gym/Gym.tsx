@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Glass } from '@/ui/Glass'
 import { Sheet } from '@/ui/Sheet'
@@ -21,6 +21,13 @@ import s from './Gym.module.css'
 
 const GROUP_IDS = new Set<string>(MUSCLE_GROUPS.map((g) => g.id))
 const SEXES: Sex[] = ['female', 'male']
+
+/**
+ * Метка перехода на шаг вглубь раздела. По ней кнопка «назад» узнаёт, что
+ * предыдущая запись истории — родительский шаг, и возвращается по истории,
+ * а не кладёт родителя в неё ещё раз.
+ */
+const DOWN = { gymDown: true }
 
 /** Что раздел показывает: только упражнения, для которых есть снимок */
 const CATALOG = withShots(EXERCISES, SHOTS)
@@ -80,7 +87,7 @@ function GroupsScreen({ profile }: { profile: Profile }) {
       <div className={s.groups}>
         {MUSCLE_GROUPS.map((g, i) => (
           <Glass key={g.id} padding="none" className="rise-in" style={{ '--i': i } as CSSProperties}>
-            <button className={`${s.groupCard} pressable`} onClick={() => navigate(`/gym/${g.id}`)}>
+            <button className={`${s.groupCard} pressable`} onClick={() => navigate(`/gym/${g.id}`, { state: DOWN })}>
               <span className={s.groupArt}>
                 <GroupArt group={g.id} sex={profile.sex} />
               </span>
@@ -116,7 +123,7 @@ function SexScreen({ profile }: { profile: Profile }) {
       <div className={s.sexes}>
         {SEXES.map((sex, i) => (
           <Glass key={sex} padding="none" className="rise-in" style={{ '--i': i } as CSSProperties}>
-            <button className={`${s.sexCard} pressable`} onClick={() => navigate(`/gym/${g}/${sex}`)}>
+            <button className={`${s.sexCard} pressable`} onClick={() => navigate(`/gym/${g}/${sex}`, { state: DOWN })}>
               <span className={s.sexCover}>
                 <Cover group={g} sex={sex} />
               </span>
@@ -186,6 +193,11 @@ function ExercisesScreen() {
   const navigate = useNavigate()
   const favIds = useLiveQuery(() => favoriteIds('exercise'), []) ?? []
   const [opened, setOpened] = useState<Exercise | null>(null)
+  // Постоянная ссылка, а не стрелка в разметке: шторка перезапускает свой
+  // эффект при смене onClose и заново забирает фокус. Звезда меняет
+  // избранное, экран перерисовывается — и фокус улетал с только что нажатой
+  // звезды в начало шторки, так что снять её тем же Enter было нельзя.
+  const close = useCallback(() => setOpened(null), [])
 
   const valid = group && GROUP_IDS.has(group) && (sex === 'male' || sex === 'female')
   // Избранные поднимаются наверх, остальной порядок — как в справочнике
@@ -243,11 +255,11 @@ function ExercisesScreen() {
       </p>
 
       <Sheet
-        open={opened !== null} title={opened?.title} onClose={() => setOpened(null)}
+        open={opened !== null} title={opened?.title} onClose={close}
         actions={opened ? (
           <span className={s.sheetActions}>
             <StarButton kind="exercise" id={opened.id} />
-            <button className={`${s.closeBtn} pressable`} onClick={() => setOpened(null)} aria-label="Закрыть">
+            <button className={`${s.closeBtn} pressable`} onClick={close} aria-label="Закрыть">
               <Icon name="close" size={16} />
             </button>
           </span>
@@ -339,10 +351,22 @@ function Fact({ label, value }: { label: string; value: string }) {
   )
 }
 
+/**
+ * «Назад» внутри раздела не добавляет шаг в историю. Раньше она делала
+ * обычный переход на родителя, и следом системная «назад» возвращала
+ * вперёд, в только что покинутый экран. Если сюда пришли с родителя, это
+ * просто шаг назад по истории; если по прямой ссылке или из «Избранного» —
+ * родитель подменяет текущий адрес.
+ */
 function Back({ to, label }: { to: string; label: string }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromParent = (location.state as typeof DOWN | null)?.gymDown === true
   return (
-    <button className={s.back} onClick={() => navigate(to)}>
+    <button
+      className={s.back}
+      onClick={() => (fromParent ? navigate(-1) : navigate(to, { replace: true }))}
+    >
       <Icon name="chevron-left" size={16} />
       {label}
     </button>

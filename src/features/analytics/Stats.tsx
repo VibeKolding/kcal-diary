@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Bar, BarChart, CartesianGrid, Cell, Line, LineChart,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Glass } from '@/ui/Glass'
 import { Chip, ChipRow } from '@/ui/Chip'
-import type { Profile, WaterRecord, WeightRecord } from '@/domain/types'
-import { weekdayShort, humanDay, dayKey, shiftDay, plural } from '@/domain/dates'
-import { accuracy, averageKcal, bestStreak, currentStreak, verdict } from '@/domain/streaks'
+import type { Profile } from '@/domain/types'
+import { weekdayShort, humanDay, plural } from '@/domain/dates'
+import { accuracy, averageKcal, verdict } from '@/domain/streaks'
 import { deviation } from '@/domain/nutrition'
-import { weightsForRange, waterForRange } from '@/db/tracking'
 import { humanWeeks, movingAverage, weeklyTrend, weeksToTarget } from '@/domain/weight'
-import { buildDays, buildHabits, averageMacros, periodTotals, type DayPoint, type Habits, type PeriodTotals } from './data'
+import { buildReport, averageMacros, periodTotals, type PeriodTotals, type Report } from './data'
 import { DayTooltip, type ChartDay } from './DayTooltip'
 import { Delta } from '@/ui/Delta'
 import { Empty } from '@/ui/Empty'
 import { CountUp } from '@/ui/CountUp'
+import { Skeleton } from '@/ui/Skeleton'
 import s from './Stats.module.css'
 
 /** Разброс внутри периода: ровная неделя и качели дают один и тот же итог */
@@ -49,23 +50,40 @@ const RANGES = [
 
 export function Stats({ profile }: { profile: Profile }) {
   const [days, setDays] = useState(7)
-  const [points, setPoints] = useState<DayPoint[]>([])
-  const [habits, setHabits] = useState<Habits | null>(null)
-  const [weights, setWeights] = useState<WeightRecord[]>([])
-  const [water, setWater] = useState<WaterRecord[]>([])
+  // Живой запрос, а не разовая загрузка: кнопка «+» открывает добавление
+  // еды поверх любого экрана, и отчёт обязан учесть запись сразу, а не
+  // после ухода с экрана. При смене периода useLiveQuery держит прежний
+  // отчёт, пока не соберётся новый, — экран не мигает пустотой.
+  const report = useLiveQuery(() => buildReport(profile, days), [profile, days])
 
-  useEffect(() => {
-    void (async () => {
-      setPoints(await buildDays(profile, days))
-      setHabits(await buildHabits(days))
-      // По датам, а не по числу записей: раньше «неделя» показывала семь
-      // последних взвешиваний, даже если они разбросаны по полугоду
-      const today = dayKey()
-      setWeights(await weightsForRange(shiftDay(today, -(days - 1)), today))
-      setWater(await waterForRange(shiftDay(today, -(days - 1)), today))
-    })()
-  }, [profile, days])
+  return (
+    <div className={s.screen}>
+      <h1 className={s.title}>Отчёты</h1>
 
+      <ChipRow center>
+        {RANGES.map((r) => (
+          <Chip key={r.days} active={days === r.days} onClick={() => setDays(r.days)}>
+            {r.label}
+          </Chip>
+        ))}
+      </ChipRow>
+
+      {/* Пока отчёт не собран, неизвестно, пуст ли он: заглушки вместо
+          «Пока нечего показывать», которое мелькало перед графиками */}
+      {report ? <ReportCards profile={profile} report={report} /> : (
+        <>
+          <Skeleton height={104} />
+          <Skeleton height={280} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function ReportCards({ profile, report }: { profile: Profile; report: Report }) {
+  // Период берётся из самого отчёта, а не из выбранной вкладки: пока новый
+  // отчёт собирается, подписи должны соответствовать показанным цифрам
+  const { days, points, habits, weights, water, streaks, missed } = report
   const loggedCount = points.filter((p) => p.logged).length
   const avg = Math.round(averageKcal(points))
   const { macros, days: macroDays, skipped: macroSkipped } = averageMacros(points)
@@ -102,23 +120,20 @@ export function Stats({ profile }: { profile: Profile }) {
     verdict: verdict(p),
   }))
 
+  // Вес и вода от еды не зависят: неделя взвешиваний без записей еды —
+  // обычное начало, и прятать график веса за пустым дневником нельзя,
+  // другого места у него нет. Запись воды с нулём — это убранный по ошибке
+  // стакан, а не день с водой: карточка из одних нулей не нужна
+  const showWeight = weights.length > 1
+  const showWater = waterDays.length > 0
+
   return (
-    <div className={s.screen}>
-      <h1 className={s.title}>Отчёты</h1>
-
-      <ChipRow center>
-        {RANGES.map((r) => (
-          <Chip key={r.days} active={days === r.days} onClick={() => setDays(r.days)}>
-            {r.label}
-          </Chip>
-        ))}
-      </ChipRow>
-
+    <>
       {loggedCount === 0 ? (
         <Glass padding="lg">
           <Empty
             glyph="stats"
-            title="Пока нечего показывать"
+            title={showWeight || showWater ? 'Еды за этот период нет' : 'Пока нечего показывать'}
             text={`Записи за последние ${days} дней появятся здесь в виде графиков и разбора привычек.`}
           />
         </Glass>
@@ -157,9 +172,14 @@ export function Stats({ profile }: { profile: Profile }) {
                 </li>
               ))}
             </ul>
+            {/* accessibilityLayer выключен: иначе recharts делает svg фокусируемым
+                «приложением», и Tab останавливался на графике, скрытом от скринридера */}
             <div className={s.chart} aria-hidden="true">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <BarChart
+                  data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+                  accessibilityLayer={false}
+                >
                   <CartesianGrid vertical={false} stroke="var(--track)" />
                   <XAxis
                     dataKey="label" tickLine={false} axisLine={false}
@@ -262,15 +282,15 @@ export function Stats({ profile }: { profile: Profile }) {
             </div>
             <div className={s.stats} style={{ marginBottom: 'var(--s4)' }}>
               <div className={s.stat}>
-                <div className={`${s.statValue} ${s.gold} num`}>{currentStreak(points)}</div>
+                <div className={`${s.statValue} ${s.gold} num`}>{streaks.current}</div>
                 <div className={s.statLabel}>Дней подряд</div>
               </div>
               <div className={s.stat}>
-                <div className={`${s.statValue} num`}>{bestStreak(points)}</div>
+                <div className={`${s.statValue} num`}>{streaks.best}</div>
                 <div className={s.statLabel}>Лучшая серия</div>
               </div>
               <div className={s.stat}>
-                <div className={`${s.statValue} num`}>{points.length - loggedCount}</div>
+                <div className={`${s.statValue} num`}>{missed}</div>
                 <div className={s.statLabel}>Пропущено</div>
               </div>
             </div>
@@ -291,134 +311,145 @@ export function Stats({ profile }: { profile: Profile }) {
               })}
             </div>
           </Glass>
-
-          {weights.length > 1 && (
-            <Glass>
-              <div className={s.cardHead}>
-                <span className={s.cardTitle}>Вес</span>
-                <span className={`${s.cardHint} num`}>
-                  {trend !== null ? `${trend > 0 ? '+' : ''}${trend.toFixed(2)} кг/нед` : `${lastKg} кг`}
-                </span>
-              </div>
-              {goalWeeks !== null && profile.targetWeightKg && (
-                <p className={`${s.forecast} num`}>
-                  До {profile.targetWeightKg} кг при таком темпе — {humanWeeks(goalWeeks)}
-                </p>
-              )}
-              {trend !== null && profile.targetWeightKg && goalWeeks === null && (
-                <p className={s.forecast}>Вес идёт не в сторону цели — прогноза нет.</p>
-              )}
-              <div className={s.chart} style={{ height: 150 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={smoothed} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="var(--track)" />
-                    <XAxis
-                      dataKey="date" tickLine={false} axisLine={false}
-                      tickFormatter={(d: string) => d.slice(8)}
-                      tick={{ fill: 'var(--text-faint)', fontSize: 10 }}
-                    />
-                    <YAxis
-                      domain={['dataMin - 1', 'dataMax + 1']}
-                      tickLine={false} axisLine={false} width={38}
-                      tick={{ fill: 'var(--text-faint)', fontSize: 10 }}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--bg)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 14, fontSize: 12, color: 'var(--text)',
-                      }}
-                      formatter={(v) => [`${Number(v)} кг`, '']}
-                    />
-                    <Line
-                      type="monotone" dataKey="kg" isAnimationActive={false}
-                      stroke="var(--gold-2)" strokeWidth={1.5} strokeOpacity={0.55}
-                      dot={{ r: 2.5, fill: 'var(--gold-1)', strokeWidth: 0 }}
-                    />
-                    {/* Сглаженная линия — то, на что стоит смотреть; точки — шум дня */}
-                    <Line
-                      type="monotone" dataKey="avg" isAnimationActive={false}
-                      stroke="var(--gold-1)" strokeWidth={2.5} dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </Glass>
-          )}
-
-          {water.length > 0 && (
-            <Glass>
-              <div className={s.cardHead}>
-                <span className={s.cardTitle}>Вода</span>
-                <span className={`${s.cardHint} num`}>норма {profile.waterGoalMl} мл</span>
-              </div>
-              <div className={s.stats} style={{ marginBottom: 'var(--s4)' }}>
-                <div className={s.stat}>
-                  <div className={`${s.statValue} num`}><CountUp value={waterAvg} /></div>
-                  <div className={s.statLabel}>мл в день</div>
-                </div>
-                <div className={s.stat}>
-                  <div className={`${s.statValue} num`}><CountUp value={waterHit} /></div>
-                  <div className={s.statLabel}>дней в норме</div>
-                </div>
-                <div className={s.stat}>
-                  <div className={`${s.statValue} num`}><CountUp value={waterDays.length} /></div>
-                  <div className={s.statLabel}>дней с водой</div>
-                </div>
-              </div>
-              <div className={s.waterBars} aria-hidden="true">
-                {points.map((p) => {
-                  const ml = water.find((w) => w.date === p.date)?.ml ?? 0
-                  return (
-                    <span key={p.date} className={s.waterCol}>
-                      <span
-                        className={`${s.waterFill} ${ml >= profile.waterGoalMl ? s.waterOk : ''}`}
-                        style={{ height: `${Math.round((ml / waterMax) * 100)}%` }}
-                      />
-                    </span>
-                  )
-                })}
-              </div>
-            </Glass>
-          )}
-
-          {habits && habits.topFoods.length > 0 && (
-            <Glass>
-              <div className={s.cardHead}>
-                <span className={s.cardTitle}>Привычки</span>
-                <span className={s.cardHint}>за {days} дней</span>
-              </div>
-
-              <div className={s.habitList}>
-                {habits.topFoods.map((f) => (
-                  <div key={f.title} className={s.habit}>
-                    <span className={s.habitName}>{f.title}</span>
-                    <span className={`${s.habitValue} num`}>{f.count}× · {f.kcal} ккал</span>
-                  </div>
-                ))}
-              </div>
-
-              {habits.heaviestMeal && (
-                <div className={s.insight} style={{ marginTop: 'var(--s4)' }}>
-                  <span className={s.insightLabel}>Самый тяжёлый приём пищи</span>
-                  <span className={`${s.insightValue} num`}>
-                    {habits.heaviestMeal.meal} · {habits.heaviestMeal.kcal} ккал за период
-                  </span>
-                </div>
-              )}
-
-              {habits.worstWeekday && (
-                <div className={s.insight}>
-                  <span className={s.insightLabel}>Самый калорийный день недели</span>
-                  <span className={`${s.insightValue} num`}>
-                    {habits.worstWeekday.label} · {habits.worstWeekday.kcal} ккал в среднем
-                  </span>
-                </div>
-              )}
-            </Glass>
-          )}
         </>
       )}
-    </div>
+
+      {showWeight && (
+        <Glass>
+          <div className={s.cardHead}>
+            <span className={s.cardTitle}>Вес</span>
+            <span className={`${s.cardHint} num`}>
+              {trend !== null ? `${trend > 0 ? '+' : ''}${trend.toFixed(2)} кг/нед` : `${lastKg} кг`}
+            </span>
+          </div>
+          {goalWeeks !== null && profile.targetWeightKg && (
+            <p className={`${s.forecast} num`}>
+              До {profile.targetWeightKg} кг при таком темпе — {humanWeeks(goalWeeks)}
+            </p>
+          )}
+          {trend !== null && profile.targetWeightKg && goalWeeks === null && (
+            <p className={s.forecast}>Вес идёт не в сторону цели — прогноза нет.</p>
+          )}
+          {/* Как и у калорий: график скрыт от скринридера, числа — в списке */}
+          <ul className="sr-only">
+            {smoothed.map((w) => (
+              <li key={w.date}>
+                {humanDay(w.date)}: {w.kg} кг, в среднем за неделю {w.avg} кг
+              </li>
+            ))}
+          </ul>
+          <div className={s.chart} style={{ height: 150 }} aria-hidden="true">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={smoothed} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}
+                accessibilityLayer={false}
+              >
+                <CartesianGrid vertical={false} stroke="var(--track)" />
+                <XAxis
+                  dataKey="date" tickLine={false} axisLine={false}
+                  tickFormatter={(d: string) => d.slice(8)}
+                  tick={{ fill: 'var(--text-faint)', fontSize: 10 }}
+                />
+                <YAxis
+                  domain={['dataMin - 1', 'dataMax + 1']}
+                  tickLine={false} axisLine={false} width={38}
+                  tick={{ fill: 'var(--text-faint)', fontSize: 10 }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: 'var(--bg)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 14, fontSize: 12, color: 'var(--text)',
+                  }}
+                  formatter={(v) => [`${Number(v)} кг`, '']}
+                />
+                <Line
+                  type="monotone" dataKey="kg" isAnimationActive={false}
+                  stroke="var(--gold-2)" strokeWidth={1.5} strokeOpacity={0.55}
+                  dot={{ r: 2.5, fill: 'var(--gold-1)', strokeWidth: 0 }}
+                />
+                {/* Сглаженная линия — то, на что стоит смотреть; точки — шум дня */}
+                <Line
+                  type="monotone" dataKey="avg" isAnimationActive={false}
+                  stroke="var(--gold-1)" strokeWidth={2.5} dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Glass>
+      )}
+
+      {showWater && (
+        <Glass>
+          <div className={s.cardHead}>
+            <span className={s.cardTitle}>Вода</span>
+            <span className={`${s.cardHint} num`}>норма {profile.waterGoalMl} мл</span>
+          </div>
+          <div className={s.stats} style={{ marginBottom: 'var(--s4)' }}>
+            <div className={s.stat}>
+              <div className={`${s.statValue} num`}><CountUp value={waterAvg} /></div>
+              <div className={s.statLabel}>мл в день</div>
+            </div>
+            <div className={s.stat}>
+              <div className={`${s.statValue} num`}><CountUp value={waterHit} /></div>
+              <div className={s.statLabel}>дней в норме</div>
+            </div>
+            <div className={s.stat}>
+              <div className={`${s.statValue} num`}><CountUp value={waterDays.length} /></div>
+              <div className={s.statLabel}>дней с водой</div>
+            </div>
+          </div>
+          <div className={s.waterBars} aria-hidden="true">
+            {points.map((p) => {
+              const ml = water.find((w) => w.date === p.date)?.ml ?? 0
+              return (
+                <span key={p.date} className={s.waterCol}>
+                  <span
+                    className={`${s.waterFill} ${ml >= profile.waterGoalMl ? s.waterOk : ''}`}
+                    style={{ height: `${Math.round((ml / waterMax) * 100)}%` }}
+                  />
+                </span>
+              )
+            })}
+          </div>
+        </Glass>
+      )}
+
+      {habits.topFoods.length > 0 && (
+        <Glass>
+          <div className={s.cardHead}>
+            <span className={s.cardTitle}>Привычки</span>
+            <span className={s.cardHint}>за {days} дней</span>
+          </div>
+
+          <div className={s.habitList}>
+            {habits.topFoods.map((f) => (
+              <div key={f.title} className={s.habit}>
+                <span className={s.habitName}>{f.title}</span>
+                <span className={`${s.habitValue} num`}>{f.count}× · {f.kcal} ккал</span>
+              </div>
+            ))}
+          </div>
+
+          {habits.heaviestMeal && (
+            <div className={s.insight} style={{ marginTop: 'var(--s4)' }}>
+              <span className={s.insightLabel}>Самый тяжёлый приём пищи</span>
+              <span className={`${s.insightValue} num`}>
+                {habits.heaviestMeal.meal} · {habits.heaviestMeal.kcal} ккал за период
+              </span>
+            </div>
+          )}
+
+          {habits.worstWeekday && (
+            <div className={s.insight}>
+              <span className={s.insightLabel}>Самый калорийный день недели</span>
+              <span className={`${s.insightValue} num`}>
+                {habits.worstWeekday.label} · {habits.worstWeekday.kcal} ккал в среднем
+              </span>
+            </div>
+          )}
+        </Glass>
+      )}
+    </>
   )
 }

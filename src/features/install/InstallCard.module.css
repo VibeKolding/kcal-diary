@@ -43,3 +43,7 @@
   margin: 0 2px;
   color: var(--crystal-ink);
 }
+
+/* Зачем устанавливать: не ради иконки, а чтобы система не стёрла дневник */
+.why { font-size: var(--fs-md); color: var(--text-dim); line-height: 1.55; }
+.why strong { color: var(--text); font-weight: 700; }

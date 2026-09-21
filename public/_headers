@@ -1,5 +1,7 @@
 # Заголовки безопасности. Читаются Netlify и Cloudflare Pages.
-# Для Vercel то же самое продублировано в vercel.json.
+# Источник правды — src/app/securityHeaders.ts; копии здесь, в netlify.toml
+# и vercel.json сверяет src/app/securityHeaders.test.ts. Правите одну —
+# правьте все, иначе тест упадёт.
 /*
   # Что странице разрешено загружать и куда обращаться.
   # connect-src открыт ровно в один адрес — базу штрихкодов Open Food Facts.
@@ -11,9 +13,9 @@
   X-Frame-Options: DENY
   # Адрес страницы не утекает на сторонние сайты
   Referrer-Policy: no-referrer
-  # Камера нужна только для штрихкода и только самому приложению.
-  # Всё остальное железо запрещено наглухо.
-  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()
+  # Камера — для штрихкода; датчики движения — для наклона знака на
+  # заставке. Всё только самому приложению, остальное железо запрещено.
+  Permissions-Policy: camera=(self), accelerometer=(self), gyroscope=(self), magnetometer=(self), microphone=(), geolocation=(), payment=(), usb=()
   # Только по HTTPS, включая поддомены
   Strict-Transport-Security: max-age=63072000; includeSubDomains
 
@@ -21,4 +23,8 @@
   Cache-Control: public, max-age=31536000, immutable
 
 /sw.js
+  Cache-Control: no-cache
+
+# Подключается в воркер; браузер сверяет его при каждой проверке обновлений
+/sw-notifications.js
   Cache-Control: no-cache

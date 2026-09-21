@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { ACTIVITY_FACTORS, GOAL_RATES, ageFrom, birthDateFromAge, bmr, calcTargets, tdee } from './targets'
+import {
+  ACTIVITY_FACTORS, GOAL_RATES, MAX_AUTO_WATER_ML, MIN_CARBS_SHARE, ageFrom, birthDateFromAge,
+  bmr, calcTargets, referenceWeight, splitMacros, tdee, waterGoalFor,
+} from './targets'
 
 const NOW = new Date('2026-09-07T12:00:00')
 
@@ -14,6 +17,22 @@ describe('ageFrom', () => {
 
   it('засчитывает год ровно в день рождения', () => {
     expect(ageFrom('1990-09-07', NOW)).toBe(36)
+  })
+
+  /*
+   * new Date('1996-10-01') — это полночь по UTC. В Нью-Йорке это ещё
+   * 30 сентября, и возраст прибавлялся на сутки раньше дня рождения.
+   */
+  it('читает дату рождения по местному времени, а не по UTC', () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      expect(ageFrom('1996-10-01', new Date(2027, 8, 30, 12))).toBe(30)
+      expect(ageFrom('1996-10-01', new Date(2027, 9, 1, 0, 1))).toBe(31)
+    } finally {
+      if (tz === undefined) delete process.env.TZ
+      else process.env.TZ = tz
+    }
   })
 })
 
@@ -106,6 +125,80 @@ describe('calcTargets', () => {
     )
     expect(r.targets.carbs).toBeGreaterThanOrEqual(0)
   })
+
+  /*
+   * Женщина 45 лет, 165 см, 130 кг на снижении получала 260 г белка,
+   * 104 г жиров и 0 г углеводов: белок и жиры вдвоём давали больше
+   * калорий, чем вся норма.
+   */
+  it('при большом весе оставляет углеводы и не превышает норму белком и жирами', () => {
+    const cases = [
+      { sex: 'female' as const, birthDate: '1981-09-07', heightCm: 165, weightKg: 130, activity: 'sedentary' as const },
+      { sex: 'male' as const, birthDate: '1996-09-07', heightCm: 180, weightKg: 300, activity: 'sedentary' as const },
+      { sex: 'female' as const, birthDate: '1966-09-07', heightCm: 150, weightKg: 45, activity: 'sedentary' as const },
+      { sex: 'female' as const, birthDate: '1936-09-07', heightCm: 100, weightKg: 30, activity: 'sedentary' as const },
+    ]
+    for (const c of cases) {
+      for (const goal of ['lose', 'keep', 'gain'] as const) {
+        for (const ratePerWeek of GOAL_RATES[goal]) {
+          const { targets: t } = calcTargets({ ...c, goal, ratePerWeek }, NOW)
+          expect(t.protein * 4 + t.fat * 9).toBeLessThanOrEqual(t.kcal * (1 - MIN_CARBS_SHARE))
+          expect(t.carbs * 4).toBeGreaterThanOrEqual(t.kcal * MIN_CARBS_SHARE - 2)
+          expect(Math.abs(t.protein * 4 + t.fat * 9 + t.carbs * 4 - t.kcal)).toBeLessThanOrEqual(4)
+        }
+      }
+    }
+  })
+
+  it('белок при ожирении считает от скорректированного веса', () => {
+    const r = calcTargets({
+      sex: 'female', birthDate: '1981-09-07', heightCm: 165, weightKg: 130,
+      activity: 'sedentary', goal: 'lose', ratePerWeek: 0.5,
+    }, NOW)
+    // вес при ИМТ 25 — 68 кг, плюс 40 % лишнего ≈ 93 кг, ×2 г
+    expect(r.targets.protein).toBe(186)
+    expect(r.targets.carbs).toBeGreaterThan(100)
+  })
+
+  /*
+   * BMR 2293 после округления до десятков давал норму 2290 — ниже
+   * базового обмена, хотя экран обещал «не ниже».
+   */
+  it('после округления норма не опускается ниже базового обмена', () => {
+    const r = calcTargets({
+      sex: 'male', birthDate: '1996-09-07', heightCm: 150, weightKg: 150,
+      activity: 'light', goal: 'lose', ratePerWeek: 1,
+    }, NOW)
+    expect(r.clampedToBmr).toBe(true)
+    expect(r.bmr % 10).not.toBe(0)
+    expect(r.targets.kcal).toBeGreaterThanOrEqual(r.bmr)
+    expect(r.targets.kcal % 10).toBe(0)
+  })
+})
+
+describe('referenceWeight и splitMacros', () => {
+  it('при нормальном весе берёт настоящий вес', () => {
+    expect(referenceWeight(80, 180)).toBe(80)
+  })
+
+  it('выше ИМТ 25 прибавляет только 40 % лишнего', () => {
+    // 25 × 1.8² = 81 кг
+    expect(referenceWeight(181, 180)).toBeCloseTo(121, 5)
+  })
+
+  it('при тесной норме сначала урезает жиры, потом белок, но углеводы оставляет', () => {
+    const m = splitMacros(1000, { weightKg: 80, heightCm: 180, goal: 'lose' })
+    expect(m.fat).toBe(48) // 0.6 г/кг
+    expect(m.protein * 4 + m.fat * 9).toBeLessThanOrEqual(800)
+    expect(m.carbs).toBeGreaterThanOrEqual(50)
+  })
+})
+
+describe('норма воды', () => {
+  it('30 мл на килограмм, но не больше 4 литров', () => {
+    expect(waterGoalFor(80)).toBe(2400)
+    expect(waterGoalFor(300)).toBe(MAX_AUTO_WATER_ML)
+  })
 })
 
 describe('birthDateFromAge', () => {
@@ -113,6 +206,17 @@ describe('birthDateFromAge', () => {
     for (const age of [14, 30, 47, 100]) {
       expect(ageFrom(birthDateFromAge(age, NOW), NOW)).toBe(age)
     }
+  })
+
+  /* 29 февраля в невисокосном году Date переносил на 1 марта — возраст выходил на год меньше */
+  it('в високосный день не теряет год', () => {
+    const leap = new Date(2028, 1, 29, 12)
+    for (const age of [14, 30, 31, 47]) {
+      const date = birthDateFromAge(age, leap)
+      expect(ageFrom(date, leap)).toBe(age)
+    }
+    expect(birthDateFromAge(30, leap)).toBe('1998-02-28')
+    expect(birthDateFromAge(32, leap)).toBe('1996-02-29')
   })
 })
 

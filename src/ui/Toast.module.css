@@ -45,6 +45,7 @@
 }
 
 .action {
+  position: relative;
   flex: none;
   height: var(--h-sm);
   padding: 0 var(--s3);
@@ -53,6 +54,14 @@
   color: var(--contrast-text);
   font-size: var(--fs-md);
   font-weight: 700;
+}
+/* Кнопка 36 px по высоте, а зона касания — 44: тост и так живёт недолго,
+   промахиваться по «Отменить» некогда */
+.action::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--h-sm) - var(--h-md)) / 2) 0;
+  border-radius: inherit;
 }
 
 @keyframes rise {

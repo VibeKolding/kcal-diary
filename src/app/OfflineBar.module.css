@@ -1,11 +1,13 @@
+/*
+ * Полоска лежит в потоке над экраном, а не поверх него. Раньше она была
+ * fixed у верхнего края и закрывала заголовки «Зал», «Отчёты», «Профиль»
+ * и верх кнопки «Назад» — тап по нему не проходил. Отступ от выреза
+ * экрана даёт общий контейнер полосок в App.module.css.
+ */
 .bar {
-  position: fixed;
-  top: calc(var(--s2) + env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 35;
+  max-width: 100%;
   padding: var(--s1) var(--s3);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   border: 1px solid var(--glass-border-soft);
   background: var(--glass-strong);
   backdrop-filter: blur(var(--blur));
@@ -13,11 +15,15 @@
   color: var(--text-dim);
   font-size: var(--fs-sm);
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.5;
+  /* На 320 px фраза в строку не влезала и срезалась краями экрана:
+     пусть лучше встанет в две ровные строки */
+  text-align: center;
+  text-wrap: balance;
   animation: drop var(--dur) var(--ease);
 }
 
 @keyframes drop {
-  from { transform: translate(-50%, -12px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: none; opacity: 1; }
 }

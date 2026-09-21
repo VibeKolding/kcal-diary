@@ -2,7 +2,11 @@ import { NavLink } from 'react-router-dom'
 import { Icon } from '@/ui/Icon'
 import s from './TabBar.module.css'
 
-
+/*
+ * aria-label у вкладок повторяет видимую подпись, только строчными: слово
+ * прописными скринридер норовит прочесть по буквам. Имя обязано совпадать
+ * с подписью — иначе голосовая команда «нажми Отчёты» вкладку не найдёт.
+ */
 export function TabBar({ onAdd }: { onAdd: () => void }) {
   return (
     <nav className={s.wrap} aria-label="Основная навигация">
@@ -19,7 +23,7 @@ export function TabBar({ onAdd }: { onAdd: () => void }) {
         <Icon name="plus" size={24} strokeWidth={2.2} />
       </button>
 
-      <NavLink to="/stats" viewTransition className={s.tab} aria-label="Аналитика">
+      <NavLink to="/stats" viewTransition className={s.tab} aria-label="Отчёты">
         <Icon name="stats" size={21} />
         <span className={s.label}>ОТЧЁТЫ</span>
       </NavLink>

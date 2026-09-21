@@ -1,0 +1,59 @@
+/* Та же стеклянная плашка, что у тоста, но в потоке над экраном: см. OfflineBar */
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  max-width: 100%;
+  padding: var(--s1) var(--s1) var(--s1) var(--s4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur-strong)) saturate(var(--glass-saturate-strong));
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(var(--glass-saturate-strong));
+  box-shadow: var(--shadow-soft);
+  animation: drop var(--dur) var(--ease);
+}
+
+/* Подложка под стекло, как у тоста: без неё текст тонет в ярком пятне фона */
+.bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--glass-scrim);
+  z-index: -1;
+}
+
+.text {
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.action {
+  flex: none;
+  height: var(--h-sm);
+  padding: 0 var(--s3);
+  border-radius: var(--radius-pill);
+  background: var(--contrast-fill);
+  color: var(--contrast-text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  border-radius: var(--radius-pill);
+  color: var(--text-faint);
+}
+
+@keyframes drop {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}

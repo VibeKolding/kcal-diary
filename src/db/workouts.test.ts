@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from './db'
 import {
-  addSet, bestSet, favoriteIds, groupByDate, restSeconds, setsForExercise, toggleFavorite,
+  addSet, bestSet, deleteSet, exerciseLog, favoriteIds, groupByDate, restoreSet, restSeconds,
+  setsForExercise, toggleFavorite,
 } from './workouts'
 
 describe('журнал подходов', () => {
@@ -24,6 +25,27 @@ describe('журнал подходов', () => {
     const s = await addSet('x', 22.3, 0)
     expect(s.weightKg).toBe(22.5)
     expect(s.reps).toBe(1)
+  })
+
+  it('рекорд считается по всем подходам, а не по показанным', async () => {
+    // Самый старый подход — лучший, за ним 34 подхода полегче
+    await db.sets.put({ id: 's-old', date: '2026-08-01', exerciseId: 'deadlift', weightKg: 100, reps: 5, createdAt: 1 })
+    for (let i = 0; i < 34; i++) {
+      await db.sets.put({ id: `s${i}`, date: '2026-09-01', exerciseId: 'deadlift', weightKg: 50, reps: 10, createdAt: 100 + i })
+    }
+    const log = await exerciseLog('deadlift')
+    expect(log.sets).toHaveLength(30)
+    expect(log.sets.some((x) => x.id === 's-old')).toBe(false)
+    expect(log.best).toMatchObject({ weightKg: 100, reps: 5 })
+    expect(await setsForExercise('deadlift')).toHaveLength(30)
+  })
+
+  it('удалённый подход возвращается «Отменить» с тем же id и датой', async () => {
+    const s = await addSet('squat', 60, 8, '2026-09-18')
+    await deleteSet(s.id)
+    expect(await setsForExercise('squat')).toEqual([])
+    await restoreSet(s)
+    expect(await setsForExercise('squat')).toEqual([s])
   })
 
   it('отдых читается из текста', () => {

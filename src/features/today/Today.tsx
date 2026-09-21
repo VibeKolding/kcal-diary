@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Glass } from '@/ui/Glass'
 import { Ring } from '@/ui/Ring'
@@ -7,19 +7,24 @@ import { Pill } from '@/ui/Pill'
 import { FoodIcon } from '@/ui/FoodIcon'
 import { MealIcon } from '@/ui/MealIcon'
 import { MEALS, MEAL_LABELS, sumByMeal, sumEntries, entryNutrients } from '@/domain/nutrition'
-import { dayKey, humanDay, shiftDay, weekdayShort } from '@/domain/dates'
+import { humanDay, shiftDay, weekdayShort } from '@/domain/dates'
 import type { Entry, Meal, Profile } from '@/domain/types'
 import { entriesForDay, copyDay } from '@/db/entries'
-import { getWater, addWater, latestWeight, getNote, putNote } from '@/db/tracking'
+import { getWater, addWater, latestWeight } from '@/db/tracking'
+import { getMeta } from '@/db/db'
 import { humanWeeks, weeksToTarget } from '@/domain/weight'
-import { buildDays } from '@/features/analytics/data'
-import { currentStreak, verdict } from '@/domain/streaks'
-import { TextField } from '@/ui/TextField'
+import { buildDays, buildStreaks } from '@/features/analytics/data'
+import { verdict } from '@/domain/streaks'
 import { tap } from '@/ui/haptic'
 import { useToast } from '@/ui/Toast'
 import { Icon } from '@/ui/Icon'
-import { backupIsStale, exportBackup } from '@/features/backup/backup'
 import { EntrySheet } from './EntrySheet'
+import { DayNote } from './DayNote'
+import { BackupNudge, StorageNotice } from './DataSafety'
+import { STORAGE_NOTICE_SEEN } from './safetyText'
+import { saveErrorText } from './saveError'
+import { setViewedDay, useToday } from './useToday'
+import { useSave } from './useSave'
 import s from './Today.module.css'
 
 interface Props {
@@ -27,39 +32,72 @@ interface Props {
   onAdd: (meal: Meal, date: string) => void
 }
 
+/** Сколько после копирования касание считается вторым касанием той же кнопки */
+const GHOST_TAP_MS = 400
+
 export function Today({ profile, onAdd }: Props) {
-  const today = dayKey()
+  const today = useToday()
   const [date, setDate] = useState(today)
+  // Полночь без перезагрузки: кто смотрел на «Сегодня», переезжает на
+  // новый день вместе с ним, а кто листал прошлое — остаётся, где был.
+  // Состояние меняется прямо при отрисовке, чтобы шапка ни на кадр не
+  // показала «Вчера» вместо «Сегодня»
+  const [seenToday, setSeenToday] = useState(today)
+  if (seenToday !== today) {
+    setSeenToday(today)
+    if (date === seenToday) setDate(today)
+  }
   const [editing, setEditing] = useState<Entry | null>(null)
   const toast = useToast()
+  const copy = useSave()
+  const copiedAt = useRef(0)
 
-  // Один приём вчерашнего дня — copyDay давно это умел, а кнопки не было
-  async function repeatYesterday(meal: Meal) {
-    const n = await copyDay(shiftDay(date, -1), date, meal)
-    if (n === 0) toast({ text: `Вчера ${MEAL_LABELS[meal].toLowerCase()} был пустым` })
-    else tap()
+  // «+» в таб-баре пишет в тот день, который открыт здесь
+  useEffect(() => {
+    setViewedDay(date)
+    return () => setViewedDay(null)
+  }, [date])
+
+  // Один приём или весь вчерашний день. Второе касание двойного не должно
+  // копировать всё ещё раз — ни пока идёт запись, ни пока новые строки
+  // не успели встать на место кнопки
+  function copyYesterday(meal?: Meal) {
+    if (Date.now() - copiedAt.current < GHOST_TAP_MS) return
+    void copy.run(async () => {
+      const n = await copyDay(shiftDay(date, -1), date, meal)
+      if (n === 0) {
+        toast({ text: meal ? `Вчера ${MEAL_LABELS[meal].toLowerCase()} был пустым` : 'Вчера записей не было' })
+        return
+      }
+      copiedAt.current = Date.now()
+      tap()
+    })
   }
 
-  const entries = useLiveQuery(() => entriesForDay(date), [date]) ?? []
+  // undefined — ещё грузится, и это не то же самое, что пустой день: иначе
+  // кольцо на миг показывало бы всю норму и докручивало её вниз, а приёмы
+  // мелькали бы «Пока пусто». При смене дня здесь остаётся прошлый день,
+  // пока не придёт новый, — число докручивается от прежнего значения
+  const loadedEntries = useLiveQuery(() => entriesForDay(date), [date])
+  const loaded = loadedEntries !== undefined
+  const entries = loadedEntries ?? []
   const water = useLiveQuery(() => getWater(date), [date]) ?? 0
   const weight = useLiveQuery(() => latestWeight(), [])
   const glass = profile.glassMl ?? 250
+  const noticeSeen = useLiveQuery(() => getMeta<boolean>(STORAGE_NOTICE_SEEN, false), [])
 
-  // Сводка недели — одна строка, чтобы не ходить в отчёты каждый день
-  const [week, setWeek] = useState<{ hit: number; logged: number; streak: number } | null>(null)
-  useEffect(() => {
-    void buildDays(profile, 7).then((pts) => setWeek({
-      hit: pts.filter((p) => verdict(p) === 'onTarget').length,
-      logged: pts.filter((p) => p.logged).length,
-      streak: currentStreak(pts),
-    }))
-  }, [profile, entries.length])
+  // Сводка недели — одна строка, чтобы не ходить в отчёты каждый день.
+  // Живой запрос: правка граммов меняет калории, но не число записей, и
+  // зависимость от длины списка её не замечала. Серия — за всю историю,
+  // а не за семь дней окна
+  const week = useLiveQuery(async () => {
+    const [pts, streaks] = await Promise.all([buildDays(profile, 7), buildStreaks(today)])
+    return { hit: pts.filter((p) => verdict(p) === 'onTarget').length, streak: streaks.current }
+  }, [profile, today])
 
-  // Заметка к дню: хранится отдельно и пишется при потере фокуса
-  const savedNote = useLiveQuery(() => getNote(date), [date]) ?? ''
-  const [note, setNote] = useState('')
-  const [noteOpen, setNoteOpen] = useState(false)
-  useEffect(() => { setNote(savedNote); setNoteOpen(savedNote.length > 0) }, [savedNote, date])
+  function changeWater(ml: number) {
+    addWater(ml, date).then(() => tap(), (e: unknown) => toast({ text: saveErrorText(e) }))
+  }
 
   const rate = profile.goal === 'lose' ? -profile.ratePerWeek : profile.goal === 'gain' ? profile.ratePerWeek : 0
   const toGoal = weight && profile.targetWeightKg
@@ -72,6 +110,9 @@ export function Today({ profile, onAdd }: Props) {
   const left = Math.round(target - total.kcal)
   const progress = target > 0 ? total.kcal / target : 0
   const over = left < 0
+  // Число на кольце точное, а тревожная плашка — только за коридором ±10 %:
+  // 2050 из 2000 сводка недели и отчёты считают днём в норме
+  const overCorridor = verdict({ date, kcal: total.kcal, target, logged: entries.length > 0 }) === 'over'
 
   return (
     <div className={s.screen}>
@@ -82,7 +123,7 @@ export function Today({ profile, onAdd }: Props) {
           <Icon name="chevron-left" size={16} />
         </button>
         <div className={s.headCenter}>
-          <div className={s.day}>{humanDay(date, today)}</div>
+          <h1 className={s.day}>{humanDay(date, today)}</h1>
           <div className={s.daySub}>
             {weekdayShort(date)} · {date.split('-').reverse().slice(0, 2).join('.')}
           </div>
@@ -97,13 +138,18 @@ export function Today({ profile, onAdd }: Props) {
         </button>
       </header>
 
+      {/* Сразу после анкеты — пока человек не нажмёт «Понятно» */}
+      {noticeSeen === false && <StorageNotice />}
+
       <Glass accent padding="lg" className={`${s.heroCard} rise-in`}>
         <div className={s.hero}>
           {/* Кольцо приподнято над карточкой — герой выходит за границу,
               как тарелка в референсе */}
           <div className={s.ringWrap}>
             <Ring progress={progress} size={218}>
-              <Ring.Big>{Math.abs(left)}</Ring.Big>
+              {/* Число появляется, когда день прочитан, и сразу настоящим:
+                  key пересоздаёт его, и докрутка начинается с первого значения */}
+              <Ring.Big key={loaded ? 'value' : 'wait'}>{loaded ? Math.abs(left) : '\u00a0'}</Ring.Big>
               <Ring.Caption>{over ? 'ККАЛ СВЕРХ НОРМЫ' : 'ККАЛ ОСТАЛОСЬ'}</Ring.Caption>
             </Ring>
           </div>
@@ -114,7 +160,7 @@ export function Today({ profile, onAdd }: Props) {
             <span className="num">{profile.targets.kcal} норма</span>
           </div>
 
-          {over && (
+          {overCorridor && (
             <span className={s.overBadge}>
               <Icon name="warn" size={14} /> Перебор нормы
             </span>
@@ -155,8 +201,15 @@ export function Today({ profile, onAdd }: Props) {
             </div>
           </div>
           <div className={s.waterBtns}>
-            <Pill size="sm" variant="ghost" onClick={() => { tap(); void addWater(-glass, date) }}>−</Pill>
-            <Pill size="sm" variant="ghost" onClick={() => { tap(); void addWater(glass, date) }}>+{glass}</Pill>
+            {/* На кнопках только «−» и «+250»: подпись для скринридера говорит, о чём речь */}
+            <Pill size="sm" variant="ghost" disabled={water <= 0} onClick={() => changeWater(-glass)}>
+              <span aria-hidden="true">−</span>
+              <span className="sr-only">Убрать {glass} мл воды</span>
+            </Pill>
+            <Pill size="sm" variant="ghost" onClick={() => changeWater(glass)}>
+              <span aria-hidden="true">+{glass}</span>
+              <span className="sr-only">Добавить {glass} мл воды</span>
+            </Pill>
           </div>
         </div>
       </Glass>
@@ -177,10 +230,14 @@ export function Today({ profile, onAdd }: Props) {
             </div>
 
             {mealEntries.length === 0 ? (
-              <div className={s.mealEmpty}>
+              // Пока день грузится, строка занимает своё место невидимой:
+              // пустой день не прыгает, а полный не мигает «Пока пусто»
+              <div className={`${s.mealEmpty} ${loaded ? '' : s.pending}`}>
                 <span className={s.emptyText}>Пока пусто</span>
                 <span className={s.mealActions}>
-                  <Pill size="sm" variant="quiet" onClick={() => void repeatYesterday(meal)}>Как вчера</Pill>
+                  <Pill size="sm" variant="quiet" onClick={() => copyYesterday(meal)}>
+                    Как вчера
+                  </Pill>
                   <Pill size="sm" variant="ghost" onClick={() => onAdd(meal, date)}>Добавить</Pill>
                 </span>
               </div>
@@ -193,7 +250,12 @@ export function Today({ profile, onAdd }: Props) {
                       <button
                         key={e.id} className={`${s.entry} pressable rise-in`}
                         style={{ '--i': i } as CSSProperties}
-                        onClick={() => setEditing(e)}
+                        onClick={() => {
+                          // Второе касание нетерпеливого двойного по «Как вчера»
+                          // попадает в строку, выросшую на месте кнопки
+                          if (Date.now() - copiedAt.current < GHOST_TAP_MS) return
+                          setEditing(e)
+                        }}
                       >
                         <FoodIcon
                           category={e.category} size={38}
@@ -219,77 +281,20 @@ export function Today({ profile, onAdd }: Props) {
         )
       })}
 
-      <div className={s.noteBlock}>
-        {noteOpen ? (
-          <TextField
-            label="Заметка к дню" value={note} onChange={setNote}
-            placeholder="День рождения, болел, застолье…"
-            trailing={note !== savedNote ? (
-              <button className={`${s.noteSave} pressable`} onClick={() => { void putNote(date, note); tap() }}>
-                <Icon name="check" size={16} strokeWidth={2.2} />
-              </button>
-            ) : undefined}
-          />
-        ) : (
-          <button className={`${s.addLine} pressable`} onClick={() => setNoteOpen(true)}>
-            <Icon name="plus" size={14} strokeWidth={2.2} /> Заметка к дню
-          </button>
-        )}
-      </div>
+      {/* key по дате: уход с дня сохраняет черновик заметки именно этого дня */}
+      <DayNote key={date} date={date} />
 
-      {entries.length === 0 && (
+      {loaded && entries.length === 0 && (
         <div className={s.quickRow}>
-          <Pill
-            size="sm" variant="ghost"
-            onClick={() => void copyDay(shiftDay(date, -1), date)}
-          >
+          <Pill size="sm" variant="ghost" onClick={() => copyYesterday()}>
             Скопировать вчерашний день
           </Pill>
         </div>
       )}
 
-      <BackupNudge />
+      {noticeSeen === true && <BackupNudge />}
 
       <EntrySheet entry={editing} onClose={() => setEditing(null)} />
-    </div>
-  )
-}
-
-/**
- * Напоминание о копии там, где человек находится.
- *
- * Копию можно было сделать и раньше — кнопка лежит в профиле. Но чтобы до
- * неё дойти, нужно вспомнить, что она существует, и уйти с экрана, на
- * котором ты только что записал ужин. Поэтому строка появляется прямо
- * здесь и делает копию одним нажатием.
- *
- * Показывается, только когда копии нет больше недели, и исчезает сразу
- * после нажатия: постоянная плашка «сделайте копию» перестаёт читаться
- * на третий день.
- */
-function BackupNudge() {
-  const [show, setShow] = useState(false)
-  const [done, setDone] = useState(false)
-  const toast = useToast()
-
-  useEffect(() => { void backupIsStale().then(setShow) }, [])
-  if (!show || done) return null
-
-  return (
-    <div className={s.nudge}>
-      <span className={s.nudgeText}>
-        Дневник хранится только на этом телефоне. Копии нет больше недели.
-      </span>
-      <Pill
-        size="sm"
-        onClick={async () => {
-          await exportBackup()
-          setDone(true)
-          toast({ text: 'Копия сохранена в загрузки' })
-        }}
-      >
-        Сохранить
-      </Pill>
     </div>
   )
 }

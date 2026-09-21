@@ -31,7 +31,8 @@
 .rowLabel { color: var(--text-dim); font-weight: 600; }
 .rowValue { font-weight: 700; }
 
-.quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
+/* align-items: start — ошибка под одним полем не сдвигает соседнее */
+.quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); align-items: start; }
 
 .field { display: grid; gap: var(--s2); min-width: 0; }
 .label { composes: t-caps from global; }
@@ -89,7 +90,14 @@
 .hidden { display: none; }
 
 /* --- Редактор анкеты --- */
+/* Зона касания 44 px, как у всех кнопок; отрицательные поля не дают ей
+   раздвинуть заголовок карточки — видимая строка остаётся прежней */
 .editBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-md);
+  padding: 0 var(--s2);
+  margin: calc(var(--s3) * -1) calc(var(--s2) * -1);
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-dim);

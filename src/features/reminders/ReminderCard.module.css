@@ -11,13 +11,14 @@
 
 .form { display: grid; gap: var(--s3); }
 
+/* Черта над строкой, а не под ней: строки с временем — label, строка воды —
+   div, и :last-of-type считал бы их раздельно, срезая черту не там */
 .row {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--s3);
   padding: var(--s2) 0;
-  border-bottom: 1px solid var(--glass-border-soft);
 }
-.row:last-of-type { border-bottom: none; }
+.row + .row { border-top: 1px solid var(--glass-border-soft); }
 .rowText { display: grid; gap: 1px; min-width: 0; }
 .rowTitle { font-size: var(--fs-ui); font-weight: 700; }
 .rowHint { font-size: var(--fs-sm); color: var(--text-faint); }

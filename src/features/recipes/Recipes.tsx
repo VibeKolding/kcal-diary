@@ -7,10 +7,13 @@ import {
   computeRecipe, deleteRecipe, listRecipes, saveRecipe, type RecipeNutrition,
 } from '@/db/recipes'
 import { searchFoods } from '@/db/foods'
+import { db } from '@/db/db'
 import { Empty } from '@/ui/Empty'
 import { Icon } from '@/ui/Icon'
 import { TextField } from '@/ui/TextField'
-import { NumberField } from '@/ui/NumberField'
+import { NumberField, cleanNumberInput, parseNumber } from '@/ui/NumberField'
+import { useToast } from '@/ui/Toast'
+import { tap } from '@/ui/haptic'
 import s from './Recipes.module.css'
 
 export interface PickedRecipe {
@@ -23,6 +26,7 @@ export function RecipeList({ onPick }: { onPick: (r: PickedRecipe) => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [nutrition, setNutrition] = useState<Record<string, RecipeNutrition>>({})
   const [building, setBuilding] = useState(false)
+  const toast = useToast()
 
   const reload = useCallback(async () => {
     const rows = await listRecipes()
@@ -33,6 +37,21 @@ export function RecipeList({ onPick }: { onPick: (r: PickedRecipe) => void }) {
   }, [])
 
   useEffect(() => { void reload() }, [reload])
+
+  // Как у записей дневника: удаление без подтверждения, зато с откатом.
+  // Рецепт возвращается целиком, с тем же id и историей использования
+  async function remove(recipe: Recipe) {
+    await deleteRecipe(recipe.id)
+    tap()
+    toast({
+      text: `Удалено: ${recipe.name}`,
+      action: {
+        label: 'Отменить',
+        onClick: async () => { await db.recipes.put(recipe); await reload() },
+      },
+    })
+    await reload()
+  }
 
   if (building) {
     return (
@@ -73,7 +92,7 @@ export function RecipeList({ onPick }: { onPick: (r: PickedRecipe) => void }) {
                 <button
                   className={s.del}
                   aria-label={`Удалить рецепт ${r.name}`}
-                  onClick={() => void deleteRecipe(r.id).then(reload)}
+                  onClick={() => void remove(r)}
                 ><Icon name="close" size={14} /></button>
               </div>
             )
@@ -88,7 +107,14 @@ export function RecipeList({ onPick }: { onPick: (r: PickedRecipe) => void }) {
   )
 }
 
-interface Item { food: Food; grams: number }
+/**
+ * Граммы ингредиента хранятся строкой, как в NumberField: иначе «12,5»
+ * не набрать — на запятой Number() даёт NaN, поле превращается в 0,
+ * а следующая цифра — в «05».
+ */
+interface Item { food: Food; grams: string }
+
+const gramsOf = (i: Item) => Math.max(0, parseNumber(i.grams) ?? 0)
 
 function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
@@ -110,7 +136,8 @@ function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () 
     return () => { cancelled = true; clearTimeout(t) }
   }, [query])
 
-  const rawGrams = items.reduce((sum, i) => sum + i.grams, 0)
+  // Округление до десятых: сумма дробных граммов иначе выглядит как 112.50000000000001
+  const rawGrams = Math.round(items.reduce((sum, i) => sum + gramsOf(i), 0) * 10) / 10
   const effectiveYield = Number(yieldGrams) || rawGrams
 
   useEffect(() => {
@@ -120,7 +147,7 @@ function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () 
       // чтобы конструктор и сохранённый рецепт не разошлись в цифрах
       setNutrition(await computeRecipe({
         name,
-        items: items.map((i) => ({ foodId: i.food.id, grams: i.grams })),
+        items: items.map((i) => ({ foodId: i.food.id, grams: gramsOf(i) })),
         yieldGrams: effectiveYield,
         portions: Number(portions) || 1,
       }))
@@ -132,7 +159,7 @@ function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () 
   async function submit() {
     await saveRecipe({
       name,
-      items: items.map((i) => ({ foodId: i.food.id, grams: i.grams })),
+      items: items.map((i) => ({ foodId: i.food.id, grams: gramsOf(i) })),
       yieldGrams: effectiveYield,
       portions: Number(portions) || 1,
     })
@@ -154,10 +181,10 @@ function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () 
                   <div className={s.ingName}>{i.food.name}</div>
                 </span>
                 <input
-                  className={s.ingGrams} inputMode="numeric" value={i.grams}
+                  className={s.ingGrams} inputMode="decimal" value={i.grams}
                   aria-label={`Граммы: ${i.food.name}`}
                   onChange={(e) => {
-                    const g = Math.max(0, Number(e.target.value) || 0)
+                    const g = cleanNumberInput(e.target.value, true)
                     setItems((prev) => prev.map((p) => p.food.id === i.food.id ? { ...p, grams: g } : p))
                   }}
                 />
@@ -179,7 +206,7 @@ function RecipeBuilder({ onDone, onCancel }: { onDone: () => void; onCancel: () 
                 onClick={() => {
                   setItems((prev) => prev.some((p) => p.food.id === f.id)
                     ? prev
-                    : [...prev, { food: f, grams: 100 }])
+                    : [...prev, { food: f, grams: '100' }])
                   setQuery('')
                 }}
               >

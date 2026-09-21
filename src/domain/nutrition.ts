@@ -32,6 +32,9 @@ export function add(a: Nutrients, b: Nutrients): Nutrients {
 }
 
 export function entryNutrients(entry: Entry): Nutrients {
+  // Записи без состава в базе быть не должно, но она могла приехать из
+  // копии, снятой до проверки импорта. Нули лучше белого экрана.
+  if (!entry.per100) return ZERO
   return scale(entry.per100, entry.grams)
 }
 
@@ -43,7 +46,8 @@ export function entryNutrients(entry: Entry): Nutrients {
  * нулевом составе: у всего остального в дневнике ссылка есть.
  */
 export function isMacroBlind(entry: Entry): boolean {
-  if (entry.noMacros) return true
+  // Без состава вовсе (испорченная запись, см. entryNutrients) — тем более неизвестен
+  if (entry.noMacros || !entry.per100) return true
   const { kcal, protein, fat, carbs } = entry.per100
   return !entry.refId && kcal > 0 && protein === 0 && fat === 0 && carbs === 0
 }
@@ -59,7 +63,13 @@ export function sumByMeal(entries: Entry[]): Record<Meal, Nutrients> {
     dinner: ZERO,
     snack: ZERO,
   } as Record<Meal, Nutrients>
-  for (const e of entries) out[e.meal] = add(out[e.meal], entryNutrients(e))
+  for (const e of entries) {
+    // Приём не из списка бывает только в испорченных данных. Такую запись
+    // пропускаем: иначе add() читает поля у undefined и падает весь экран.
+    // В итог дня (sumEntries) она при этом попадает.
+    if (!MEALS.includes(e.meal)) continue
+    out[e.meal] = add(out[e.meal], entryNutrients(e))
+  }
   return out
 }
 

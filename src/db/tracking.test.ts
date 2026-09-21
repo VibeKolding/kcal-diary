@@ -8,6 +8,12 @@ describe('вода и вес', () => {
     await Promise.all([db.weights.clear(), db.water.clear()])
   })
 
+  /* Три касания в одном такте раньше давали 250 мл вместо 750 */
+  it('быстрые нажатия «+250» не теряют стаканы', async () => {
+    await Promise.all([addWater(250, '2026-09-20'), addWater(250, '2026-09-20'), addWater(250, '2026-09-20')])
+    expect(await getWater('2026-09-20')).toBe(750)
+  })
+
   it('вода не уходит в минус', async () => {
     await addWater(250, '2026-09-19')
     await addWater(-1000, '2026-09-19')

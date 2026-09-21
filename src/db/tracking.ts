@@ -8,11 +8,18 @@ export async function getWater(date = dayKey()): Promise<number> {
   return (await db.water.get(date))?.ml ?? 0
 }
 
+/**
+ * Чтение и запись — одной транзакцией. Иначе два быстрых нажатия «+250»
+ * (или ярлык воды во второй вкладке) читали одно и то же значение, и
+ * второй стакан затирал первый.
+ */
 export async function addWater(ml: number, date = dayKey()): Promise<number> {
-  const current = await getWater(date)
-  const next = Math.max(0, current + ml)
-  await db.water.put({ date, ml: next })
-  return next
+  return db.transaction('rw', db.water, async () => {
+    const current = (await db.water.get(date))?.ml ?? 0
+    const next = Math.max(0, current + ml)
+    await db.water.put({ date, ml: next })
+    return next
+  })
 }
 
 export async function waterForRange(from: string, to: string): Promise<WaterRecord[]> {
@@ -23,8 +30,10 @@ export async function waterForRange(from: string, to: string): Promise<WaterReco
 
 /** Запись дня сливается с существующей: вес утром, обхваты вечером — одна строка */
 export async function putWeight(record: WeightRecord): Promise<void> {
-  const prev = await db.weights.get(record.date)
-  await db.weights.put({ ...prev, ...record })
+  await db.transaction('rw', db.weights, async () => {
+    const prev = await db.weights.get(record.date)
+    await db.weights.put({ ...prev, ...record })
+  })
 }
 
 export async function latestWeight(): Promise<WeightRecord | undefined> {

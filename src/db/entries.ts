@@ -50,10 +50,16 @@ export async function addRecipeEntry(
   }
   await db.entries.put(entry)
   // Рецепт считается использованным так же, как продукт: иначе он никогда
-  // не всплывал бы наверх списка
-  await db.recipes.update(recipe.id, {
-    usageCount: (recipe.usageCount ?? 0) + 1,
-    lastUsedAt: Date.now(),
+  // не всплывал бы наверх списка. Счётчик читается из базы, а не из
+  // переданного объекта: тот мог устареть, и два добавления подряд
+  // засчитывались бы как одно.
+  await db.transaction('rw', db.recipes, async () => {
+    const current = await db.recipes.get(recipe.id)
+    if (!current) return
+    await db.recipes.update(recipe.id, {
+      usageCount: (current.usageCount ?? 0) + 1,
+      lastUsedAt: Date.now(),
+    })
   })
   return entry
 }
@@ -126,11 +132,14 @@ export async function restoreEntry(entry: Entry): Promise<void> {
 /** «Скопировать вчерашний день» и «повторить приём пищи» */
 export async function copyDay(from: string, to: string, meal?: Meal): Promise<number> {
   const source = await entriesForDay(from)
-  const rows = (meal ? source.filter((e) => e.meal === meal) : source).map((e) => ({
+  // Время у копий идёт по порядку оригиналов. С одним Date.now() на всех
+  // день сортировался по случайным id, и завтрак каждый раз перемешивался.
+  const now = Date.now()
+  const rows = (meal ? source.filter((e) => e.meal === meal) : source).map((e, i) => ({
     ...e,
     id: newId('e'),
     date: to,
-    createdAt: Date.now(),
+    createdAt: now + i,
   }))
   if (rows.length === 0) return 0
   await db.entries.bulkPut(rows)

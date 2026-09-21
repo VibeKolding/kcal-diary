@@ -29,7 +29,11 @@
   transition: transform var(--dur) var(--ease);
   outline: none;
 }
-/* Уход короче прихода: то, что убирают, не должно задерживать */
+/* Фокус на самой панели — только точка входа после открытия, рамка вокруг
+   всего листа ничего не сообщает. Селектор сильнее общего правила из base.css */
+.sheet[role='dialog']:focus-visible { outline: none; }
+/* Уход короче прихода: то, что убирают, не должно задерживать.
+   Начинается с --drag — с того места, где панель отпустили пальцем */
 .sheetOut { animation: sink 220ms var(--ease) both; }
 
 /* Подложка не даёт светлому фону провалить контраст текста на стекле */
@@ -80,6 +84,7 @@
 }
 
 .close {
+  position: relative;
   display: grid; place-items: center;
   width: var(--h-sm); height: var(--h-sm);
   border-radius: 50%;
@@ -90,7 +95,16 @@
   line-height: 1;
   flex: none;
 }
+/* Кружок 36 px, а зона касания — 44, как у остальных кнопок: крестик
+   нажимают в панели чаще всего. Отступ считается от внутренней стороны
+   рамки, отсюда лишний пиксель */
+.close::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--h-sm) - var(--h-md)) / 2 - 1px);
+  border-radius: 50%;
+}
 
 @keyframes rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes sink { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes sink { from { transform: translateY(var(--drag, 0px)); } to { transform: translateY(100%); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }

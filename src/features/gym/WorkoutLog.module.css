@@ -17,6 +17,13 @@
 }
 .saveBtn { height: var(--h-xl); padding: 0 var(--s4); }
 
+/* На 320–360 px кнопка забирала ширину у полей, и в «Весе» оставалось
+   15 px: вместо «60» читалось «6(». Там кнопка уходит отдельной строкой. */
+@media (max-width: 360px) {
+  .form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .saveBtn { grid-column: 1 / -1; }
+}
+
 .rest {
   position: relative;
   overflow: hidden;
@@ -46,9 +53,15 @@
 .day { display: flex; align-items: center; gap: var(--s3); }
 .dayName { flex: none; width: 76px; font-size: var(--fs-sm); font-weight: 700; color: var(--text-faint); }
 .daySets { display: flex; flex-wrap: wrap; gap: var(--s1); }
+/* Фишка подхода — кнопка удаления, поэтому высотой с обычный чип, а не
+   с подпись, и с крестиком: без него касание, которое стирает подход,
+   ничем не отличалось от касания по надписи */
 .set {
-  height: 28px;
-  padding: 0 var(--s2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  height: var(--h-sm);
+  padding: 0 var(--s2) 0 var(--s3);
   border-radius: var(--radius-pill);
   border: 1px solid var(--glass-border-soft);
   background: var(--glass);
@@ -56,3 +69,4 @@
   font-weight: 700;
   color: var(--text);
 }
+.setX { flex: none; color: var(--text-faint); }

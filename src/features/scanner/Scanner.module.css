@@ -46,7 +46,7 @@
 
 .error { color: var(--danger); }
 
-.offline {
+.miss {
   display: grid;
   gap: var(--s3);
   padding: var(--s4);
@@ -63,4 +63,18 @@
   color: var(--text);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+/* Источник данных: база открыта по ODbL и просит называть себя */
+.credit {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+.credit a {
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }

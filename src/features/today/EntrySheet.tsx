@@ -9,41 +9,54 @@ import { deleteEntry, restoreEntry, updateEntryGrams } from '@/db/entries'
 import { useLast } from '@/ui/useLast'
 import { tap } from '@/ui/haptic'
 import { useToast } from '@/ui/Toast'
+import { GramsInput } from './GramsInput'
+import { gramsDraft, parseGrams } from './grams'
+import { saveErrorText } from './saveError'
+import { useSave } from './useSave'
 import s from './EntrySheet.module.css'
 
 /** Правка веса уже добавленной записи и её удаление */
 export function EntrySheet({ entry, onClose }: { entry: Entry | null; onClose: () => void }) {
-  const [grams, setGrams] = useState(100)
+  const [draft, setDraft] = useState('100')
   const toast = useToast()
+  const { pending, run } = useSave()
 
   useEffect(() => {
-    if (entry) setGrams(Math.round(entry.grams))
+    if (entry) setDraft(gramsDraft(entry.grams))
   }, [entry])
 
   // Панель уезжает с последней записью, даже когда родитель её уже обнулил
   const shown = useLast(entry)
   if (!shown) return null
 
-  const n = scale(shown.per100, grams)
+  const grams = parseGrams(draft)
+  const n = scale(shown.per100, grams ?? 0)
 
-  async function save() {
-    if (!shown) return
-    await updateEntryGrams(shown.id, grams)
-    tap()
-    onClose()
+  function save() {
+    if (!shown || grams === null) return
+    void run(async () => {
+      await updateEntryGrams(shown.id, grams)
+      tap()
+      onClose()
+    })
   }
 
-  async function remove() {
+  function remove() {
     if (!shown) return
     const snapshot = shown
-    await deleteEntry(snapshot.id)
-    tap()
-    onClose()
-    // Удаление без подтверждения, зато с откатом: запись возвращается
-    // с тем же id, и день выглядит так, будто ничего не трогали
-    toast({
-      text: `Удалено: ${snapshot.title}`,
-      action: { label: 'Отменить', onClick: () => restoreEntry(snapshot) },
+    void run(async () => {
+      await deleteEntry(snapshot.id)
+      tap()
+      onClose()
+      // Удаление без подтверждения, зато с откатом: запись возвращается
+      // с тем же id, и день выглядит так, будто ничего не трогали
+      toast({
+        text: `Удалено: ${snapshot.title}`,
+        action: {
+          label: 'Отменить',
+          onClick: () => restoreEntry(snapshot).catch((e: unknown) => toast({ text: saveErrorText(e) })),
+        },
+      })
     })
   }
 
@@ -60,25 +73,7 @@ export function EntrySheet({ entry, onClose }: { entry: Entry | null; onClose: (
           </div>
         </div>
 
-        <div>
-          <div className={s.gramsRow}>
-            <input
-              className={s.gramsInput}
-              type="number" inputMode="numeric" min={1} max={3000}
-              value={grams}
-              onChange={(e) => setGrams(Math.max(1, Number(e.target.value) || 0))}
-            />
-            <span className={s.unit}>граммов</span>
-          </div>
-          <input
-            className={s.slider}
-            type="range" min={5} max={600} step={5}
-            value={Math.min(grams, 600)}
-            onChange={(e) => setGrams(Number(e.target.value))}
-            style={{ marginTop: 'var(--s4)' }}
-            aria-label="Вес порции"
-          />
-        </div>
+        <GramsInput value={draft} onChange={setDraft} />
 
         <Glass flat>
           <div className={s.grid}>
@@ -102,8 +97,8 @@ export function EntrySheet({ entry, onClose }: { entry: Entry | null; onClose: (
         </Glass>
 
         <div className={s.actions}>
-          <Pill variant="ghost" className={s.danger} onClick={remove}>Удалить</Pill>
-          <Pill block onClick={save}>Сохранить</Pill>
+          <Pill variant="ghost" className={s.danger} disabled={pending} onClick={remove}>Удалить</Pill>
+          <Pill block disabled={pending || grams === null} onClick={save}>Сохранить</Pill>
         </div>
       </div>
     </Sheet>

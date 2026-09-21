@@ -33,5 +33,6 @@
 
 .quiet { color: var(--text-dim); }
 
-.sm { height: var(--h-md); padding: 0 var(--s4); font-size: var(--fs-ui); }
+/* Не уже высоты: кнопка из одного знака («−» у воды) иначе выходила 42 px */
+.sm { height: var(--h-md); min-width: var(--h-md); padding: 0 var(--s4); font-size: var(--fs-ui); }
 .block { display: flex; width: 100%; }

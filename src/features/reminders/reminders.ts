@@ -95,26 +95,71 @@ export function nextWaterAt(everyH: number, now = new Date()): number {
   return t.getTime()
 }
 
+/** Опоздание, после которого напоминание уже не к месту, мс */
+export const LATE_MS = 15 * 60 * 1000
+
 /**
- * Планировщик. Веб-приложение без сервера не умеет будить себя из ниоткуда,
- * поэтому таймеры живут, пока дневник открыт или свёрнут. Возвращает
- * функцию остановки.
+ * Опоздал ли таймер. Пока телефон спит или вкладка заморожена, таймеры
+ * стоят, и просроченный срабатывает в момент возврата: «Дневник за сегодня
+ * пуст» в восемь утра — про новый, только начавшийся день, а стакан воды —
+ * посреди ночи. Такое напоминание пропускается, следующее встаёт по плану.
+ * Смена дня — тоже опоздание: напоминание о вчерашнем дне сегодня ни к чему.
+ */
+export function isLate(when: number, now: number = Date.now()): boolean {
+  return now - when > LATE_MS || dayKey(new Date(when)) !== dayKey(new Date(now))
+}
+
+/**
+ * Длинное ожидание режется на отрезки. Таймер на восемь часов вперёд
+ * отсчитывает время работы устройства, а не часы: сон ноутбука или
+ * заморозка вкладки сдвигают его на всю длину сна. Отрезок в пять минут
+ * сверяется с часами, и срок не уплывает.
+ */
+export const STEP_MS = 5 * 60 * 1000
+
+export function nextWait(when: number, now: number = Date.now()): number {
+  return Math.min(STEP_MS, Math.max(0, when - now))
+}
+
+/**
+ * Планировщик. Веб-приложение без сервера не умеет будить себя из ниоткуда:
+ * таймеры идут, пока страница жива, а свёрнутую вкладку телефон вскоре
+ * замораживает. Пропущенное за это время не догоняется (см. isLate).
+ * Возвращает функцию остановки.
  */
 export function schedule(settings: ReminderSettings, waterGoalMl: number): () => void {
   if (!settings.enabled || Notification.permission !== 'granted') return () => {}
-  const timers: number[] = []
-  const arm = (kind: Kind, when: number, again: () => number) => {
-    const delay = Math.max(1000, when - Date.now())
-    timers.push(window.setTimeout(async () => {
-      const msg = await buildMessage(kind, waterGoalMl)
-      if (msg) await notify(msg[0], msg[1], `kcal-${kind}`)
-      arm(kind, again(), again)
-    }, delay))
+  // Один текущий таймер на вид напоминания: и отрезки ожидания, и
+  // перевзвод после срабатывания заменяют его, а не копятся
+  const timers = new Map<Kind, number>()
+  // Остановка ставит флаг, а не только чистит таймеры: срабатывание могло
+  // уже ждать buildMessage, и без флага оно перевзвело бы цепочку со
+  // старыми настройками уже после «Выключить»
+  let stopped = false
+
+  const arm = (kind: Kind, when: number, next: () => number) => {
+    if (stopped) return
+    const wait = nextWait(when)
+    timers.set(kind, window.setTimeout(async () => {
+      if (stopped) return
+      if (Date.now() < when) { arm(kind, when, next); return }
+      if (!isLate(when)) {
+        const msg = await buildMessage(kind, waterGoalMl)
+        if (stopped) return
+        if (msg) await notify(msg[0], msg[1], `kcal-${kind}`)
+      }
+      arm(kind, next(), next)
+    }, wait))
   }
-  if (settings.mealAt) arm('meal', nextAt(settings.mealAt), () => nextAt(settings.mealAt))
-  if (settings.weighAt) arm('weigh', nextAt(settings.weighAt), () => nextAt(settings.weighAt))
-  if (settings.waterEveryH > 0) {
-    arm('water', nextWaterAt(settings.waterEveryH), () => nextWaterAt(settings.waterEveryH))
+
+  const start = (kind: Kind, next: () => number) => arm(kind, next(), next)
+  if (settings.mealAt) start('meal', () => nextAt(settings.mealAt))
+  if (settings.weighAt) start('weigh', () => nextAt(settings.weighAt))
+  if (settings.waterEveryH > 0) start('water', () => nextWaterAt(settings.waterEveryH))
+
+  return () => {
+    stopped = true
+    timers.forEach((t) => clearTimeout(t))
+    timers.clear()
   }
-  return () => timers.forEach((t) => clearTimeout(t))
 }

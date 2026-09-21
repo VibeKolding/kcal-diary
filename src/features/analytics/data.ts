@@ -1,9 +1,11 @@
-import type { Entry, Nutrients, Profile } from '@/domain/types'
+import type { Entry, Nutrients, Profile, WaterRecord, WeightRecord } from '@/domain/types'
 import { dayKey, lastDays, weekdayIndex } from '@/domain/dates'
 import { entryNutrients, isMacroBlind, sumEntries, ZERO, add } from '@/domain/nutrition'
 import { MEAL_LABELS } from '@/domain/nutrition'
-import { verdict, type DayStat } from '@/domain/streaks'
+import { bestStreak, currentStreak, verdict, type DayStat } from '@/domain/streaks'
+import { db } from '@/db/db'
 import { entriesForRange } from '@/db/entries'
+import { waterForRange, weightsForRange } from '@/db/tracking'
 
 export interface DayPoint extends DayStat {
   nutrients: Nutrients
@@ -13,10 +15,12 @@ export interface DayPoint extends DayStat {
 
 export async function buildDays(profile: Profile, count: number): Promise<DayPoint[]> {
   const days = lastDays(count)
-  const from = days[0]!
-  const to = days[days.length - 1]!
-  const entries = await entriesForRange(from, to)
+  const entries = await entriesForRange(days[0]!, days[days.length - 1]!)
+  return daysFromEntries(profile, days, entries)
+}
 
+/** Точки графика по уже прочитанным записям: одна выборка на весь отчёт */
+export function daysFromEntries(profile: Profile, days: string[], entries: Entry[]): DayPoint[] {
   const byDate = new Map<string, Entry[]>()
   for (const e of entries) {
     const list = byDate.get(e.date)
@@ -49,8 +53,10 @@ const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда',
 /** Анализ привычек: где на самом деле набираются калории */
 export async function buildHabits(days: number): Promise<Habits> {
   const range = lastDays(days)
-  const entries = await entriesForRange(range[0]!, range[range.length - 1]!)
+  return habitsFromEntries(await entriesForRange(range[0]!, range[range.length - 1]!))
+}
 
+export function habitsFromEntries(entries: Entry[]): Habits {
   const foods = new Map<string, { count: number; kcal: number }>()
   const meals = new Map<string, number>()
   const weekdays = new Map<number, { kcal: number; days: Set<string> }>()
@@ -185,6 +191,95 @@ export function periodTotals(points: DayPoint[], targets: Nutrients): PeriodTota
     over,
     under,
     onTarget,
+  }
+}
+
+export interface Streaks {
+  /** Дней подряд до сегодняшнего включительно */
+  current: number
+  /** Самая длинная серия за всё время */
+  best: number
+}
+
+/**
+ * Серии по датам, в которые дневник вёлся, — за всю историю, а не за
+ * выбранный период. Раньше они считались по точкам графика, и на «Неделе»
+ * серия не бывала длиннее семи дней: переключение на «Месяц» превращало
+ * «7 дней подряд» в «12», хотя текущая серия от периода не зависит.
+ */
+export function diaryStreaks(dates: string[], today: string = dayKey()): Streaks {
+  const stats: DayStat[] = dates.map((date) => ({ date, kcal: 0, target: 0, logged: true }))
+  return { current: currentStreak(stats, today), best: bestStreak(stats) }
+}
+
+/** Все даты, где есть хоть одна запись, по возрастанию. Читается только индекс */
+export async function loggedDates(): Promise<string[]> {
+  return (await db.entries.orderBy('date').uniqueKeys()) as string[]
+}
+
+/** Серии дневника за всю историю — для отчётов и сводки на главной */
+export async function buildStreaks(today: string = dayKey()): Promise<Streaks> {
+  return diaryStreaks(await loggedDates(), today)
+}
+
+/**
+ * С какого дня дневник ведётся: день создания профиля или первая запись,
+ * если она раньше (записи могли прийти из резервной копии).
+ */
+export function diaryStart(profile: Profile, firstLogged: string | undefined): string | null {
+  const created = Number.isFinite(profile.createdAt) ? dayKey(new Date(profile.createdAt)) : null
+  if (!created) return firstLogged ?? null
+  return firstLogged && firstLogged < created ? firstLogged : created
+}
+
+/**
+ * Пропущенные дни периода. Не в счёт дни до начала дневника — пропустить
+ * день, когда дневника ещё не было, нельзя, — и сегодняшний: до вечера ещё
+ * есть время поесть, и серия его тоже не считает обрывом.
+ */
+export function missedDays(points: DayStat[], since: string | null, today: string = dayKey()): number {
+  return points.filter((p) => !p.logged && p.date < today && (since === null || p.date >= since)).length
+}
+
+/** Всё, что показывает экран отчётов */
+export interface Report {
+  /** Период, за который собран отчёт: пока грузится новый, на экране старый целиком */
+  days: number
+  points: DayPoint[]
+  habits: Habits
+  weights: WeightRecord[]
+  water: WaterRecord[]
+  streaks: Streaks
+  missed: number
+}
+
+/**
+ * Отчёт одним запросом — для useLiveQuery: Dexie следит за всеми таблицами,
+ * которые здесь читаются, и пересобирает отчёт при любой записи в них.
+ * Поэтому еда, добавленная кнопкой «+» прямо с экрана отчётов, сразу
+ * попадает в график, средние и итог.
+ */
+export async function buildReport(profile: Profile, count: number): Promise<Report> {
+  const days = lastDays(count)
+  const from = days[0]!
+  const today = days[days.length - 1]!
+  const [entries, dates, weights, water] = await Promise.all([
+    entriesForRange(from, today),
+    loggedDates(),
+    // По датам, а не по числу записей: раньше «неделя» показывала семь
+    // последних взвешиваний, даже если они разбросаны по полугоду
+    weightsForRange(from, today),
+    waterForRange(from, today),
+  ])
+  const points = daysFromEntries(profile, days, entries)
+  return {
+    days: count,
+    points,
+    habits: habitsFromEntries(entries),
+    weights,
+    water,
+    streaks: diaryStreaks(dates, today),
+    missed: missedDays(points, diaryStart(profile, dates[0]), today),
   }
 }
 

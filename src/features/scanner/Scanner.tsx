@@ -2,22 +2,44 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pill } from '@/ui/Pill'
 import type { Food } from '@/domain/types'
 import { createFood, findByBarcode } from '@/db/foods'
-import { fetchProduct } from './openfoodfacts'
+import type { BarcodeFormat as ZxingFormat } from '@zxing/browser'
+import { lookupProduct, type OffLookup } from './openfoodfacts'
+import { PRODUCT_FORMATS, isProductBarcode, type ProductFormat } from './barcode'
 import { Spinner } from '@/ui/Spinner'
 import s from './Scanner.module.css'
+
+/** Почему продукт не нашёлся: от этого зависит, что посоветовать */
+type Miss = Exclude<OffLookup['kind'], 'found'>
 
 type State =
   | { kind: 'idle' }
   | { kind: 'starting' }
   | { kind: 'scanning' }
   | { kind: 'looking'; code: string }
-  | { kind: 'offline'; code: string }
-  | { kind: 'missing'; code: string }
+  | { kind: 'miss'; code: string; reason: Miss }
   | { kind: 'error'; message: string }
 
 interface Props {
   onFound: (food: Food) => void
-  onManual: () => void
+  /** Код передаётся, когда он уже прочитан: форма может сохранить его с продуктом */
+  onManual: (code?: string) => void
+}
+
+const MISS_TEXT: Record<Miss, string> = {
+  missing: 'Такого штрихкода нет в открытой базе продуктов. Введите данные с упаковки вручную.',
+  incomplete: 'Товар в базе есть, но без состава или с ошибкой в нём. Введите данные с упаковки вручную.',
+  unavailable: 'База продуктов сейчас не отвечает. Попробуйте позже или введите данные с упаковки вручную.',
+  timeout: 'База продуктов не ответила вовремя. Попробуйте ещё раз или введите данные с упаковки вручную.',
+  offline: 'Этого штрихкода нет в базе на устройстве, а сети сейчас нет. Введите данные с упаковки вручную.',
+  broken: 'Не получилось разобрать ответ базы продуктов. Попробуйте ещё раз или введите данные вручную.',
+}
+
+type BarcodeDetectorCtor = new (o: { formats: string[] }) => {
+  detect: (src: CanvasImageSource) => Promise<{ rawValue: string; format?: string }[]>
+}
+
+function stopTracks(stream: MediaStream): void {
+  stream.getTracks().forEach((t) => t.stop())
 }
 
 /**
@@ -31,38 +53,58 @@ export function Scanner({ onFound, onManual }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const stopRef = useRef<(() => void) | null>(null)
+  const lookupRef = useRef<AbortController | null>(null)
+  /*
+   * Номер текущей попытки. Камера включается, а продукт ищется асинхронно,
+   * и человек за это время может уйти со вкладки или закрыть панель.
+   * Каждый новый шаг и размонтирование увеличивают номер, и всё, что
+   * вернулось по старому номеру, гасится: поток камеры останавливается,
+   * ответ базы выбрасывается и не открывает панель порции поверх
+   * другого экрана.
+   */
+  const runRef = useRef(0)
   const [state, setState] = useState<State>({ kind: 'idle' })
 
   const stop = useCallback(() => {
     stopRef.current?.()
     stopRef.current = null
-    streamRef.current?.getTracks().forEach((t) => t.stop())
+    if (streamRef.current) stopTracks(streamRef.current)
     streamRef.current = null
+    lookupRef.current?.abort()
+    lookupRef.current = null
   }, [])
 
-  useEffect(() => stop, [stop])
+  useEffect(() => () => { runRef.current += 1; stop() }, [stop])
 
   const handleCode = useCallback(async (code: string) => {
     stop()
+    const run = ++runRef.current
+    const stale = () => run !== runRef.current
+    const ctrl = new AbortController()
+    lookupRef.current = ctrl
     setState({ kind: 'looking', code })
 
-    const local = await findByBarcode(code)
-    if (local) {
-      onFound(local)
-      return
-    }
-
-    if (!navigator.onLine) {
-      setState({ kind: 'offline', code })
-      return
-    }
-
     try {
-      const product = await fetchProduct(code)
-      if (!product) {
-        setState({ kind: 'missing', code })
+      const local = await findByBarcode(code)
+      if (stale()) return
+      if (local) {
+        onFound(local)
         return
       }
+
+      if (!navigator.onLine) {
+        setState({ kind: 'miss', code, reason: 'offline' })
+        return
+      }
+
+      const result = await lookupProduct(code, ctrl.signal)
+      if (stale()) return
+      if (result.kind !== 'found') {
+        setState({ kind: 'miss', code, reason: result.kind })
+        return
+      }
+
+      const { product } = result
       // Найденный продукт навсегда оседает в локальной базе:
       // в следующий раз он откроется и без сети
       const food = await createFood({
@@ -76,43 +118,52 @@ export function Scanner({ onFound, onManual }: Props) {
           : [],
         source: 'off',
       })
-      onFound(food)
+      if (!stale()) onFound(food)
     } catch {
-      setState({ kind: 'offline', code })
+      // Отмена — это уход со сканера, показывать по ней нечего
+      if (!stale()) setState({ kind: 'miss', code, reason: 'broken' })
     }
   }, [onFound, stop])
 
   const start = useCallback(async () => {
+    // Прежний поток, если он ещё жив, не должен остаться без хозяина
+    stop()
+    const run = ++runRef.current
+    const stale = () => run !== runRef.current
     setState({ kind: 'starting' })
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
       })
-      streamRef.current = stream
       const video = videoRef.current
-      if (!video) return
+      // Пока браузер спрашивал разрешение, человек мог уйти со вкладки.
+      // Очистка к этому времени уже отработала, и гасить поток больше некому
+      if (stale() || !video) {
+        stopTracks(stream)
+        return
+      }
+      streamRef.current = stream
       video.srcObject = stream
       await video.play()
+      // Дальше поток лежит в streamRef, и его погасил тот, кто сменил номер
+      if (stale()) return
       setState({ kind: 'scanning' })
 
-      const Detector = (window as unknown as {
-        BarcodeDetector?: new (o: { formats: string[] }) => {
-          detect: (src: CanvasImageSource) => Promise<{ rawValue: string }[]>
-        }
-      }).BarcodeDetector
+      const Detector = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector
 
       if (Detector) {
-        const detector = new Detector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'],
-        })
+        // Только товарные коды: QR и Code 128 несут произвольный текст
+        const detector = new Detector({ formats: [...PRODUCT_FORMATS] })
         let alive = true
         stopRef.current = () => { alive = false }
         const tick = async () => {
           if (!alive || !videoRef.current) return
           try {
             const hits = await detector.detect(videoRef.current)
-            const value = hits[0]?.rawValue
-            if (value) { void handleCode(value); return }
+            // Неверная контрольная цифра — это неточное чтение: ждём кадр получше
+            const hit = hits.find((h) => isProductBarcode(h.rawValue, h.format))
+            if (hit && alive) { void handleCode(hit.rawValue); return }
           } catch {
             // отдельный неудачный кадр — не повод останавливать сканирование
           }
@@ -121,14 +172,40 @@ export function Scanner({ onFound, onManual }: Props) {
         void tick()
       } else {
         // Фолбэк для Safari и старых браузеров
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser')
+        if (stale()) return
+        const formats: [ZxingFormat, ProductFormat][] = [
+          [BarcodeFormat.EAN_13, 'ean_13'], [BarcodeFormat.EAN_8, 'ean_8'],
+          [BarcodeFormat.UPC_A, 'upc_a'], [BarcodeFormat.UPC_E, 'upc_e'],
+        ]
         const reader = new BrowserMultiFormatReader()
-        const controls = await reader.decodeFromVideoElement(video, (result) => {
-          if (result) void handleCode(result.getText())
+        // Без подсказки zxing читает ещё QR, DataMatrix, Aztec и PDF417
+        reader.possibleFormats = formats.map(([f]) => f)
+        const controls = await reader.decodeFromVideoElement(video, (result, _error, own) => {
+          if (!result) return
+          const code = result.getText()
+          const format = formats.find(([f]) => f === result.getBarcodeFormat())?.[1] ?? 'unknown'
+          if (!isProductBarcode(code, format)) return
+          // Первый кадр разбирается ещё до того, как controls вернутся наружу,
+          // поэтому сканирование останавливаем через свои же controls
+          own.stop()
+          void handleCode(code)
         })
+        if (stale()) {
+          controls.stop()
+          return
+        }
         stopRef.current = () => controls.stop()
       }
     } catch (e) {
+      if (stale()) {
+        if (stream) stopTracks(stream)
+        return
+      }
+      // Камера могла успеть включиться до сбоя. Без этого она работает
+      // в фоне, а на экране написано, что она недоступна
+      stop()
+      if (stream) stopTracks(stream)
       const denied = e instanceof DOMException && e.name === 'NotAllowedError'
       setState({
         kind: 'error',
@@ -137,7 +214,7 @@ export function Scanner({ onFound, onManual }: Props) {
           : 'Камера недоступна. Введите продукт вручную.',
       })
     }
-  }, [handleCode])
+  }, [handleCode, stop])
 
   return (
     <div className={s.wrap}>
@@ -161,19 +238,32 @@ export function Scanner({ onFound, onManual }: Props) {
         {state.kind === 'looking' && <><Spinner size={15} /> Ищем продукт…</>}
       </div>
 
-      {(state.kind === 'offline' || state.kind === 'missing') && (
-        <div className={s.offline}>
+      {state.kind === 'miss' && (
+        <div className={s.miss}>
           <span className={s.code}>{state.code}</span>
-          {state.kind === 'offline'
-            ? 'Этого штрихкода нет в базе на устройстве, а сети сейчас нет. Заведите продукт вручную — он сохранится вместе с кодом.'
-            : 'Такого штрихкода нет в открытой базе продуктов. Введите данные с упаковки вручную — в следующий раз он найдётся сразу.'}
-          <Pill size="sm" variant="ghost" onClick={onManual}>Ввести вручную</Pill>
+          {MISS_TEXT[state.reason]}
+          <div className={s.actions}>
+            <Pill size="sm" variant="ghost" onClick={() => onManual(state.code)}>Ввести вручную</Pill>
+            <Pill size="sm" variant="ghost" onClick={start}>Сканировать снова</Pill>
+          </div>
         </div>
       )}
 
-      {(state.kind === 'idle' || state.kind === 'error') && (
-        <Pill block onClick={start}>Включить камеру</Pill>
+      {state.kind === 'idle' && <Pill block onClick={start}>Включить камеру</Pill>}
+      {state.kind === 'error' && (
+        <div className={s.actions}>
+          <Pill variant="ghost" onClick={() => onManual()}>Ввести вручную</Pill>
+          <Pill block onClick={start}>Включить камеру</Pill>
+        </div>
       )}
+
+      {/* База открыта по лицензии ODbL, и она просит называть источник */}
+      <p className={s.credit}>
+        Данные о продуктах —{' '}
+        <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener noreferrer">Open Food Facts</a>,
+        лицензия{' '}
+        <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener noreferrer">ODbL</a>
+      </p>
     </div>
   )
 }

@@ -1,8 +1,11 @@
 import {
-  useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode,
+  useEffect, useLayoutEffect, useRef, useState,
+  type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
+import { ancestry, guardFocus, rescueFocus, trapTab } from './focus'
+import { sheetStack, type SheetItem } from './sheetStack'
 import s from './Sheet.module.css'
 
 interface Props {
@@ -26,12 +29,21 @@ type Phase = 'closed' | 'open' | 'closing'
  * Уходит с той же анимацией, что и приходит: пока панель закрывается, она
  * остаётся в DOM с последним содержимым — родитель к этому моменту уже мог
  * обнулить данные. Грабер рабочий: панель можно утянуть вниз пальцем.
+ *
+ * Блокировку страницы и системное «назад» ведёт общий учёт панелей
+ * (sheetStack.ts): панель только сообщает, что открылась и закрылась.
  */
 export function Sheet({ open, title, onClose, children, actions }: Props) {
   const [phase, setPhase] = useState<Phase>(open ? 'open' : 'closed')
   const [drag, setDrag] = useState(0)
   const dragging = useRef<{ startY: number; pointerId: number } | null>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // Родители передают onClose стрелкой, новой на каждой отрисовке. Эффект
+  // панели от неё не зависит: иначе любая перерисовка родителя (звезда
+  // «в избранное», ответ базы) снимала и ставила заново inert, а фокус
+  // прыгал с кнопки на контейнер панели
+  const onCloseRef = useRef(onClose)
+  useLayoutEffect(() => { onCloseRef.current = onClose })
   // Последнее «живое» содержимое: показывается, пока панель уезжает
   const last = useRef<{ title?: string; children: ReactNode; actions?: ReactNode }>({ title, children, actions })
   if (open) last.current = { title, children, actions }
@@ -49,37 +61,45 @@ export function Sheet({ open, title, onClose, children, actions }: Props) {
     return () => clearTimeout(t)
   }, [phase])
 
+  const isOpen = phase === 'open'
   useEffect(() => {
-    if (phase !== 'open') return
+    if (!isOpen) return
+    const el = sheetRef.current
+    const stack = sheetStack()
+    el?.removeAttribute('inert')
+    const active = document.activeElement
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null
+    const item: SheetItem = { el, opener, trail: ancestry(opener), close: () => onCloseRef.current() }
+    stack.open(item)
+    // Фокус уходит в панель, а при закрытии возвращается туда, откуда пришёл
+    el?.focus({ preventScroll: true })
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return }
+      // Клавиши слушает только верхняя панель
+      if (stack.top() !== item || e.defaultPrevented || e.isComposing) return
+      if (e.key === 'Escape') item.close()
       // Tab не выходит за пределы панели: фон под ней всё равно inert
-      if (e.key !== 'Tab' || !sheetRef.current) return
-      const focusable = sheetRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      )
-      if (focusable.length === 0) return
-      const first = focusable[0]!
-      const last = focusable[focusable.length - 1]!
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+      else if (e.key === 'Tab' && el) trapTab(e, el)
     }
     document.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    // Всё под панелью недоступно ни фокусу, ни скринридеру
-    const root = document.getElementById('root')
-    root?.setAttribute('inert', '')
-    // Фокус уходит в панель, а при закрытии возвращается туда, откуда пришёл
-    const opener = document.activeElement as HTMLElement | null
-    sheetRef.current?.focus({ preventScroll: true })
+
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-      root?.removeAttribute('inert')
-      opener?.focus?.({ preventScroll: true })
+      // Уходящая панель видна ещё 220 мс, но нажать в ней уже ничего нельзя:
+      // второй тап по «Добавить в дневник» записал бы еду дважды
+      el?.setAttribute('inert', '')
+      stack.close(item)
+      // Панель, открытая изнутри этой, наследует её opener: этой панели
+      // скоро не будет в DOM, и фокусу некуда было бы вернуться
+      for (const other of stack.items()) {
+        if (other.opener && el?.contains(other.opener)) {
+          other.opener = item.opener
+          other.trail = item.trail
+        }
+      }
+      returnFocus(item, stack.top())
     }
-  }, [phase, onClose])
+  }, [isOpen])
 
   const onPointerDown = (e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -101,8 +121,10 @@ export function Sheet({ open, title, onClose, children, actions }: Props) {
 
   const shown = open ? { title, children, actions } : last.current
   const closing = phase === 'closing'
+  // --drag нужен уходу: анимация sink начинается с того места, где панель
+  // отпустили, а не прыгает сначала обратно наверх
   const style = drag > 0
-    ? { transform: `translateY(${drag}px)`, transition: 'none' }
+    ? { transform: `translateY(${drag}px)`, transition: 'none', '--drag': `${drag}px` } as CSSProperties
     : undefined
 
   return createPortal(
@@ -135,4 +157,31 @@ export function Sheet({ open, title, onClose, children, actions }: Props) {
     </>,
     document.body,
   )
+}
+
+/**
+ * Вернуть фокус после закрытия. Только если он был в этой панели или
+ * потерялся: при смене панелей он уже стоит в следующей, и забирать его
+ * оттуда на кнопку за панелью нельзя.
+ */
+function returnFocus(item: SheetItem, top: SheetItem | undefined) {
+  const active = document.activeElement
+  const lost = !active || active === document.body
+  if (!lost && !item.el?.contains(active)) return
+  // До открытия фокуса не было нигде: касание в Safari не фокусирует
+  // кнопку. Туда он и возвращается — уводить его некуда и незачем
+  if (!item.opener && !top) return
+  if (top) {
+    // Под уходящей панелью осталась другая — фокус остаётся в ней
+    const back = item.opener?.isConnected && top.el?.contains(item.opener) ? item.opener : top.el
+    back?.focus({ preventScroll: true })
+    return
+  }
+  if (item.opener?.isConnected && !item.opener.closest('[inert]')) {
+    item.opener.focus({ preventScroll: true })
+    guardFocus(item.opener, item.trail)
+  } else {
+    // Открывавшей кнопки больше нет: например, это строка удалённой записи
+    rescueFocus(item.trail)
+  }
 }

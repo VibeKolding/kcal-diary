@@ -14,8 +14,10 @@ const WATER_STEPS = [0, 1, 2, 3]
 
 /**
  * Напоминания. Честно: без сервера веб-приложение не будит себя само,
- * поэтому они срабатывают, пока дневник открыт или свёрнут. Об этом
- * написано прямо в карточке — лучше знать, чем гадать, почему молчит.
+ * поэтому они срабатывают, пока дневник открыт. Свёрнутую вкладку телефон
+ * вскоре замораживает, и раньше карточка обещала лишнее — «открыт или
+ * свёрнут». Об этом написано прямо в карточке: лучше знать, чем гадать,
+ * почему молчит.
  */
 export function ReminderCard() {
   const [st, setSt] = useState<ReminderSettings | null>(null)
@@ -59,8 +61,8 @@ export function ReminderCard() {
       {supported && !(st.enabled && perm === 'granted') && (
         <>
           <p className={s.note}>
-            Дневник напомнит записать еду, выпить воды и взвеситься. Напоминание
-            молчит, если дело уже сделано.
+            Пока дневник открыт, он напомнит записать еду, выпить воды и
+            взвеситься. Напоминание молчит, если дело уже сделано.
           </p>
           {perm === 'denied' ? (
             <p className={`${s.note} ${s.warn}`}>
@@ -76,13 +78,16 @@ export function ReminderCard() {
 
       {supported && st.enabled && perm === 'granted' && (
         <div className={s.form}>
-          <div className={s.row}>
-            <div className={s.rowText}>
+          {/* Строка с временем — label: её текст становится именем поля для
+              скринридера (иначе там два безымянных «время»), а касание по
+              тексту открывает выбор времени */}
+          <label className={s.row}>
+            <span className={s.rowText}>
               <span className={s.rowTitle}>Дневник пуст</span>
               <span className={s.rowHint}>проверить вечером</span>
-            </div>
+            </span>
             <TextField value={st.mealAt} onChange={(v) => void update({ mealAt: v })} type="time" compact />
-          </div>
+          </label>
 
           <div className={s.row}>
             <div className={s.rowText}>
@@ -98,17 +103,18 @@ export function ReminderCard() {
             </ChipRow>
           </div>
 
-          <div className={s.row}>
-            <div className={s.rowText}>
+          <label className={s.row}>
+            <span className={s.rowText}>
               <span className={s.rowTitle}>Взвешивание</span>
               <span className={s.rowHint}>утром, если веса ещё нет</span>
-            </div>
+            </span>
             <TextField value={st.weighAt} onChange={(v) => void update({ weighAt: v })} type="time" compact />
-          </div>
+          </label>
 
           <p className={s.note}>
-            Работают, пока дневник открыт или свёрнут: фоновых уведомлений
-            без сервера у веб-приложения нет.
+            Срабатывают, только пока дневник открыт. Свёрнутый дневник телефон
+            вскоре усыпляет, и пропущенное напоминание уже не придёт: фоновых
+            уведомлений без сервера у веб-приложения нет.
           </p>
           <Pill block variant="quiet" onClick={() => void update({ enabled: false })}>Выключить</Pill>
         </div>

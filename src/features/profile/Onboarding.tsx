@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Glass } from '@/ui/Glass'
 import { Pill } from '@/ui/Pill'
 import { Ring } from '@/ui/Ring'
@@ -6,12 +6,16 @@ import { Logo } from '@/ui/Logo'
 import { NumberField, parseNumber } from '@/ui/NumberField'
 import { Icon } from '@/ui/Icon'
 import {
-  ACTIVITY_LABELS, GOAL_LABELS, GOAL_MACROS, GOAL_RATES,
-  birthDateFromAge, calcTargets,
+  ACTIVITY_LABELS, GOAL_LABELS, GOAL_RATES,
+  birthDateFromAge, calcTargets, splitMacros, waterGoalFor,
 } from '@/domain/targets'
 import type { Activity, Goal, Sex } from '@/domain/types'
-import { createProfile, setManualTargets } from '@/db/profile'
+import { createProfile, getProfile, setManualTargets } from '@/db/profile'
+import { BackupError, importBackup } from '@/features/backup/backup'
 import { useTheme } from '@/app/theme'
+import { useToast } from '@/ui/Toast'
+import { KCAL_RANGE } from './norm'
+import { restoredText } from './restore'
 import s from './Onboarding.module.css'
 
 const STEPS = 4
@@ -20,6 +24,8 @@ const LIMITS = {
   age: { min: 14, max: 100, label: 'Возраст должен быть от 14 до 100 лет' },
   height: { min: 100, max: 250, label: 'Рост должен быть от 100 до 250 см' },
   weight: { min: 30, max: 300, label: 'Вес должен быть от 30 до 300 кг' },
+  // Ловит опечатку: «0» или «5» вместо «1500» делали перебором любой день
+  kcal: { ...KCAL_RANGE, label: 'Норма должна быть от 800 до 6000 ккал' },
 }
 
 function validate(raw: string, limit: { min: number; max: number; label: string }) {
@@ -31,7 +37,10 @@ function validate(raw: string, limit: { min: number; max: number; label: string 
 
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const { theme } = useTheme()
+  const toast = useToast()
   const [step, setStep] = useState(0)
+  const [restoring, setRestoring] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const [sex, setSex] = useState<Sex>('male')
   const [age, setAge] = useState('')
@@ -73,11 +82,19 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }, [basicsReady, sex, ageField.value, heightField.value, weightField.value,
       activity, goal, ratePerWeek])
 
-  const manual = parseNumber(manualKcal)
-  const kcal = manual ?? result?.targets.kcal ?? 0
+  const manualField = validate(manualKcal, LIMITS.kcal)
+  const manual = manualField.value
+  // То, что покажет экран «Ваша норма», и то, что уйдёт в базу, — одна
+  // и та же норма. Раньше экран показывал авторасчётные углеводы, а в базу
+  // шли пересчитанные под ручные калории: 171 г на экране, 71 г в дневнике.
+  // БЖУ под ручные калории делит та же функция, что и авторасчёт.
+  const targets = result && manual !== null && basicsReady
+    ? splitMacros(manual, { weightKg: weightField.value!, heightCm: heightField.value!, goal })
+    : result?.targets ?? null
+  const belowBmr = result !== null && manual !== null && manual < result.bmr
 
   async function finish() {
-    if (!result || !basicsReady) return
+    if (!result || !targets || !basicsReady || manualField.error) return
     setSaving(true)
     try {
       await createProfile({
@@ -88,23 +105,47 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         activity,
         goal,
         ratePerWeek: goal === 'keep' ? 0 : ratePerWeek,
-        waterGoalMl: Math.round(weightField.value! * 30),
+        waterGoalMl: waterGoalFor(weightField.value!),
         theme,
       })
       if (manual !== null && manual !== result.targets.kcal) {
-        // Углеводы подстраиваются под изменённую калорийность,
-        // а белки и жиры остаются требованиями цели
-        const rest = manual - result.targets.protein * 4 - result.targets.fat * 9
-        await setManualTargets({
-          kcal: manual,
-          protein: result.targets.protein,
-          fat: result.targets.fat,
-          carbs: Math.max(0, Math.round(rest / 4)),
-        })
+        await setManualTargets(targets)
       }
       onDone()
     } finally {
       setSaving(false)
+    }
+  }
+
+  /*
+   * Переезд на новый телефон. Раньше восстановление было только в профиле,
+   * а профиль открывается лишь после анкеты: приходилось выдумывать
+   * данные, создавать лишний вес и потом стирать их копией. С онбординга
+   * уводит сам App: он следит за профилем живым запросом и покажет дневник,
+   * как только профиль из копии окажется в базе. onDone лишь ставит адрес
+   * на главный экран. Копия без анкеты оставляет человека здесь — с
+   * восстановленными записями и объяснением, что осталось сделать.
+   */
+  async function restore(file: File) {
+    setRestoring(true)
+    try {
+      const res = await importBackup(file)
+      if (await getProfile()) {
+        toast({ text: `Дневник восстановлен: ${restoredText(res)}.` })
+        onDone()
+      } else {
+        toast({
+          text: 'Записи восстановлены, но анкеты в копии нет — заполните её, и дневник откроется.',
+          duration: 6000,
+        })
+      }
+    } catch (e) {
+      toast({
+        text: e instanceof BackupError ? e.message : 'Не удалось прочитать файл.',
+        duration: 6000,
+      })
+    } finally {
+      setRestoring(false)
     }
   }
 
@@ -170,6 +211,24 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             {missing && (
               <p className={s.note}>Заполните {missing}, чтобы продолжить.</p>
             )}
+
+            <div className={s.restore}>
+              <span className={s.hint}>Уже вели дневник на другом телефоне?</span>
+              <button
+                type="button" className={`${s.linkBtn} pressable`}
+                disabled={restoring} onClick={() => fileRef.current?.click()}
+              >
+                {restoring ? 'Восстанавливаем…' : 'Восстановить из копии'}
+              </button>
+              <input
+                ref={fileRef} hidden type="file" accept="application/json,.json"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) void restore(f)
+                  e.target.value = ''
+                }}
+              />
+            </div>
           </div>
         </>
       )}
@@ -247,10 +306,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               </div>
             )}
 
-            {weightField.value !== null && (
+            {/* Цифры из того же расчёта, что и норма на следующем шаге: белок
+                и жиры считаются не от веса напрямую (см. splitMacros) */}
+            {result && (
               <p className={s.hint}>
-                Для этой цели: белок {Math.round(weightField.value * GOAL_MACROS[goal].protein)} г,
-                жиры {Math.round(weightField.value * GOAL_MACROS[goal].fat)} г в день.
+                Для этой цели: белок {result.targets.protein} г,
+                жиры {result.targets.fat} г в день.
               </p>
             )}
           </div>
@@ -264,33 +325,33 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <p className={s.sub}>Рассчитана по формуле Миффлина–Сан Жеора. Любое число можно изменить.</p>
 
           <div className={s.body}>
-            {result && (
+            {result && targets && (
               <>
                 <Glass accent padding="lg">
                   <div className={s.result}>
                     <Ring progress={1} size={196}>
-                      <Ring.Big>{kcal}</Ring.Big>
+                      <Ring.Big>{targets.kcal}</Ring.Big>
                       <Ring.Caption>ККАЛ В ДЕНЬ</Ring.Caption>
                     </Ring>
 
                     <div className={s.macros}>
                       <div className={s.macro}>
-                        <div className={`${s.macroValue} num`}>{result.targets.protein} г</div>
+                        <div className={`${s.macroValue} num`}>{targets.protein} г</div>
                         <div className={s.macroLabel}>Белки</div>
                       </div>
                       <div className={s.macro}>
-                        <div className={`${s.macroValue} num`}>{result.targets.fat} г</div>
+                        <div className={`${s.macroValue} num`}>{targets.fat} г</div>
                         <div className={s.macroLabel}>Жиры</div>
                       </div>
                       <div className={s.macro}>
-                        <div className={`${s.macroValue} num`}>{result.targets.carbs} г</div>
+                        <div className={`${s.macroValue} num`}>{targets.carbs} г</div>
                         <div className={s.macroLabel}>Углеводы</div>
                       </div>
                     </div>
                   </div>
                 </Glass>
 
-                {result.clampedToBmr && (
+                {result.clampedToBmr && manual === null && (
                   <p className={`${s.note} ${s.warn}`}>
                     При таком темпе норма опустилась бы ниже базового обмена
                     ({result.bmr} ккал). Мы подняли её до безопасного минимума —
@@ -301,8 +362,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 <NumberField
                   label="Норма калорий вручную" unit="ккал"
                   placeholder={String(result.targets.kcal)}
-                  value={manualKcal} onChange={setManualKcal}
+                  value={manualKcal} onChange={setManualKcal} error={manualField.error}
                 />
+
+                {/* Ручная норма ниже базового обмена не запрещается: человек
+                    может вести её с врачом. Но молчать об этом нельзя. */}
+                {belowBmr && (
+                  <p className={`${s.note} ${s.warn}`}>
+                    Это ниже базового обмена ({result.bmr} ккал) — столько организм
+                    тратит в покое. Такую норму лучше согласовать с врачом.
+                  </p>
+                )}
 
                 <p className={s.note}>
                   Базовый обмен {result.bmr} ккал · расход с активностью {result.tdee} ккал
@@ -322,7 +392,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             Дальше
           </Pill>
         ) : (
-          <Pill block disabled={saving || !result} onClick={finish}>
+          <Pill block disabled={saving || !result || !!manualField.error} onClick={finish}>
             {saving ? 'Сохраняем…' : 'Начать вести дневник'}
           </Pill>
         )}

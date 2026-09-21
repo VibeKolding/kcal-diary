@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviation, kcalFromMacros, scale, sumByMeal, sumEntries } from './nutrition'
+import { deviation, isMacroBlind, kcalFromMacros, scale, sumByMeal, sumEntries } from './nutrition'
 import type { Entry } from './types'
 
 const per100 = { kcal: 200, protein: 10, fat: 5, carbs: 30 }
@@ -43,6 +43,20 @@ describe('sumByMeal', () => {
     expect(byMeal.dinner.kcal).toBe(400)
     expect(byMeal.lunch.kcal).toBe(0)
     expect(byMeal.snack.kcal).toBe(0)
+  })
+
+  /* Запись с приёмом не из списка (из битой копии) роняла весь главный экран */
+  it('не падает на неизвестном приёме пищи', () => {
+    const odd = entry({ id: 'e2', meal: 'brunch' as Entry['meal'] })
+    const byMeal = sumByMeal([entry({}), odd])
+    expect(byMeal.breakfast.kcal).toBe(200)
+    expect(Object.keys(byMeal)).toEqual(['breakfast', 'lunch', 'dinner', 'snack'])
+  })
+
+  it('запись без состава считает нулём, а не роняет экран', () => {
+    const broken = entry({ per100: undefined as unknown as Entry['per100'] })
+    expect(sumByMeal([broken]).breakfast).toEqual({ kcal: 0, protein: 0, fat: 0, carbs: 0 })
+    expect(isMacroBlind(broken)).toBe(true)
   })
 })
 

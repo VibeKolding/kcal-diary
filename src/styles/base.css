@@ -6,6 +6,13 @@
 
 html, body, #root { height: 100%; }
 
+/* Плавающий таб-бар закрывает низ экрана. Браузер докручивает элемент
+   в фокусе с этим запасом, иначе поле или кнопка оказывались под баром
+   целиком: бар над ним стоит, а человек не видит, где фокус */
+html {
+  scroll-padding-bottom: calc(var(--tabbar-h) + var(--s3) + env(safe-area-inset-bottom) + var(--s2));
+}
+
 body {
   margin: 0;
   font-family: var(--font-text);
@@ -208,9 +215,11 @@ input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 
 /* Фокус с клавиатуры виден, с пальца и мыши — нет. Текстовые поля
-   показывают фокус своей рамкой, поэтому здесь только кнопки и ссылки. */
-button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid var(--glass-border);
+   показывают фокус своей рамкой, поэтому здесь только кнопки, ссылки
+   и ползунки. Цвет непрозрачный: рамка стекла давала 1.4:1 к фону. */
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
+input[type='range']:focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

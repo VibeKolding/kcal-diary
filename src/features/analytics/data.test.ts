@@ -1,8 +1,13 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
-import type { Entry, Nutrients } from '@/domain/types'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Entry, Nutrients, Profile } from '@/domain/types'
 import { isMacroBlind } from '@/domain/nutrition'
-import { averageMacros, periodTotals, type DayPoint } from './data'
+import { dayKey, parseDay, shiftDay } from '@/domain/dates'
+import { db } from '@/db/db'
+import { addQuickEntry } from '@/db/entries'
+import {
+  averageMacros, buildReport, diaryStart, diaryStreaks, missedDays, periodTotals, type DayPoint,
+} from './data'
 
 function entry(over: Partial<Entry>): Entry {
   return {
@@ -94,5 +99,86 @@ describe('periodTotals', () => {
   it('пустой период не делит на ноль', () => {
     const t = periodTotals([point({ logged: false, kcal: 0 })], targets)
     expect(t).toMatchObject({ days: 0, kcal: { value: 0, target: 0 }, macroDays: 0 })
+  })
+})
+
+describe('серии дневника', () => {
+  const today = '2026-09-21'
+  const run = (from: string, n: number) => Array.from({ length: n }, (_, i) => shiftDay(from, i))
+
+  it('считаются по всей истории, а не по выбранному периоду', () => {
+    // Двенадцать дней подряд по вчерашний день: неделя их не обрезает
+    const r = diaryStreaks(run('2026-09-09', 12), today)
+    expect(r).toEqual({ current: 12, best: 12 })
+  })
+
+  it('рекорд помнит давнюю серию, текущая — только свежую', () => {
+    const r = diaryStreaks([...run('2026-06-01', 40), ...run('2026-09-19', 3)], today)
+    expect(r).toEqual({ current: 3, best: 40 })
+  })
+
+  it('пустой сегодняшний день серию не обрывает, пустой вчерашний — обрывает', () => {
+    expect(diaryStreaks(run('2026-09-18', 3), today).current).toBe(3)
+    expect(diaryStreaks(run('2026-09-15', 5), today).current).toBe(0)
+    expect(diaryStreaks([], today)).toEqual({ current: 0, best: 0 })
+  })
+})
+
+describe('пропущенные дни', () => {
+  const today = '2026-09-21'
+  const days = (logged: boolean[]) => logged.map((l, i) =>
+    point({ date: shiftDay(today, i - logged.length + 1), logged: l }))
+
+  it('не считает дни до начала дневника', () => {
+    // Месяц, дневник начат пять дней назад и ведётся каждый день
+    const pts = days([...Array<boolean>(25).fill(false), ...Array<boolean>(5).fill(true)])
+    expect(missedDays(pts, shiftDay(today, -4), today)).toBe(0)
+  })
+
+  it('не считает пустое сегодня, пока день не кончился', () => {
+    expect(missedDays(days([true, false, true, false]), null, today)).toBe(1)
+  })
+
+  it('начало дневника — создание профиля или первая запись, что раньше', () => {
+    const created = new Date(2026, 8, 10, 15, 30).getTime()
+    const p = { createdAt: created } as Profile
+    expect(diaryStart(p, undefined)).toBe('2026-09-10')
+    expect(diaryStart(p, '2026-09-12')).toBe('2026-09-10')
+    // Записи из резервной копии старше профиля
+    expect(diaryStart(p, '2026-05-01')).toBe('2026-05-01')
+  })
+})
+
+describe('отчёт целиком', () => {
+  const today = dayKey()
+  const profile: Profile = {
+    id: 1, sex: 'male', birthDate: '1990-01-01', heightCm: 180,
+    activity: 'light', goal: 'lose', ratePerWeek: 0.5,
+    targets: { kcal: 2000, protein: 140, fat: 70, carbs: 210 },
+    targetsManual: false, theme: 'dark', waterGoalMl: 2400,
+    createdAt: parseDay(shiftDay(today, -20)).getTime(),
+  }
+
+  beforeEach(async () => {
+    await Promise.all([db.entries.clear(), db.weights.clear(), db.water.clear()])
+  })
+
+  it('серия за неделю не упирается в семь дней', async () => {
+    for (let i = 1; i <= 12; i++) await addQuickEntry(1800, 'lunch', shiftDay(today, -i))
+    const r = await buildReport(profile, 7)
+    expect(r.streaks).toEqual({ current: 12, best: 12 })
+    // Сегодня ещё пусто, но это не пропуск
+    expect(r.missed).toBe(0)
+  })
+
+  it('вес и вода приходят и без записей еды', async () => {
+    for (let i = 0; i < 7; i++) {
+      await db.weights.put({ date: shiftDay(today, -i), kg: 80 - i / 10 })
+      await db.water.put({ date: shiftDay(today, -i), ml: 1500 })
+    }
+    const r = await buildReport(profile, 7)
+    expect(r.points.some((p) => p.logged)).toBe(false)
+    expect(r.weights).toHaveLength(7)
+    expect(r.water).toHaveLength(7)
   })
 })

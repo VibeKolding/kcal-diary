@@ -12,7 +12,14 @@
 .rowKcal { font-size: var(--fs-ui); font-weight: 700; color: var(--gold-1); flex: none; }
 [data-theme='light'] .rowKcal { color: var(--gold-2); }
 
-.del { color: var(--text-faint); font-size: var(--fs-lg); line-height: 1; padding: 0 var(--s2); flex: none; }
+/* Крестик — полноценная цель в 44 px, как у остальных кнопок: в полоску
+   30×17 проще промахнуться, чем попасть. Случайное касание откатывается
+   тостом «Отменить» */
+.del {
+  display: grid; place-items: center; flex: none;
+  min-width: var(--h-md); min-height: var(--h-md);
+  color: var(--text-faint); font-size: var(--fs-lg); line-height: 1;
+}
 
 .empty { text-align: center; padding: var(--s5) var(--s4); display: grid; gap: var(--s3); justify-items: center; }
 .emptyText { font-size: var(--fs-ui); color: var(--text-dim); line-height: 1.5; }

@@ -1,5 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Meal } from '@/domain/types'
 import { dayKey } from '@/domain/dates'
@@ -20,7 +20,10 @@ import { TabBar } from './TabBar'
 import { Splash } from './Splash'
 import { Spinner } from '@/ui/Spinner'
 import { OfflineBar } from './OfflineBar'
+import { UpdateBar } from './UpdateBar'
 import { useAppUpdate } from './useAppUpdate'
+import { ErrorBoundary } from './ErrorBoundary'
+import { Crash } from './Crash'
 import { ensurePersistentStorage } from '@/db/persist'
 import { useReminders } from '@/features/reminders/useReminders'
 import { addWater } from '@/db/tracking'
@@ -32,7 +35,7 @@ export function App() {
   const location = useLocation()
   const toast = useToast()
   const [ready, setReady] = useState(false)
-  const [fatal, setFatal] = useState<string | null>(null)
+  const [fatal, setFatal] = useState<{ error: unknown } | null>(null)
   // Заставка держится минимум столько, сколько длится её анимация: иначе
   // на быстром устройстве она мигнёт и исчезнет, а это хуже её отсутствия.
   const [minTimePassed, setMinTimePassed] = useState(false)
@@ -43,23 +46,45 @@ export function App() {
 
   const [adding, setAdding] = useState<{ meal: Meal; date: string } | null>(null)
 
-  useAppUpdate(splash === 'showing')
+  const update = useAppUpdate(splash === 'showing')
 
   // useLiveQuery следит за профилем: после онбординга экран сменится сам
   const profile = useLiveQuery(() => getProfile(), [])
   useReminders(profile)
 
-  // Ярлыки с домашнего экрана: /?add=1 открывает добавление, /?water=1
-  // записывает стакан. Параметр стирается, чтобы не сработать при обновлении.
+  /*
+   * Ярлыки с домашнего экрана: /?add=1 открывает добавление, /?water=1
+   * записывает стакан. Параметр стирается, чтобы не сработать при обновлении.
+   *
+   * Разбираются только после заставки. Пока она на экране, может прийти
+   * новая версия с перезагрузкой — и стёртый заранее параметр пропал бы
+   * вместе с намерением: ярлык «Добавить еду» открывал обычный экран.
+   * Заодно тост «Вода: …» больше не прячется за заставкой.
+   *
+   * Такой адрес может открыть и чужая ссылка, поэтому запись воды видна
+   * тостом с «Отменить», а ключ перехода не даёт записать стакан дважды
+   * за один переход, сколько бы раз ни прогнался эффект.
+   */
+  const handledIntent = useRef<string | null>(null)
   useEffect(() => {
-    if (!profile) return
+    if (!profile || splash !== 'gone') return
     const params = new URLSearchParams(location.search)
-    if (params.has('add')) setAdding({ meal: 'snack', date: dayKey() })
-    if (params.has('water')) {
-      void addWater(profile.glassMl ?? 250).then((ml) => toast({ text: `Вода: ${ml} мл сегодня` }))
+    const add = params.has('add')
+    const water = params.has('water')
+    if (!add && !water) return
+    if (handledIntent.current === location.key) return
+    handledIntent.current = location.key
+    navigate('/', { replace: true })
+    if (add) setAdding({ meal: 'snack', date: dayKey() })
+    if (water) {
+      const glass = profile.glassMl ?? 250
+      const date = dayKey()
+      void addWater(glass, date).then((ml) => toast({
+        text: `Вода: ${ml} мл сегодня`,
+        action: { label: 'Отменить', onClick: async () => { await addWater(-glass, date) } },
+      }))
     }
-    if (params.has('add') || params.has('water')) navigate('/', { replace: true })
-  }, [profile, location.search, navigate, toast])
+  }, [profile, splash, location.search, location.key, navigate, toast])
 
   useEffect(() => {
     // 2.4 с — это длительность самой заставки, а не запас: знак 0–0.9,
@@ -71,8 +96,10 @@ export function App() {
 
   useEffect(() => {
     seedFoods()
-      .catch((e: unknown) => {
-        setFatal(e instanceof Error ? e.message : 'Не удалось подготовить базу продуктов')
+      .catch((error: unknown) => {
+        // Подробности — в консоль; на экран идёт объяснение по-русски (errors.ts)
+        console.error(error)
+        setFatal({ error })
       })
       .finally(() => setReady(true))
   }, [])
@@ -109,13 +136,7 @@ export function App() {
     setAdding({ meal, date })
   }, [])
 
-  if (fatal) {
-    return (
-      <div className={s.boot}>
-        <p className={s.fatal}>{fatal}</p>
-      </div>
-    )
-  }
+  if (fatal) return <Crash error={fatal.error} />
 
   if (splash !== 'gone') {
     return (
@@ -133,16 +154,27 @@ export function App() {
 
   return (
     <>
-      <Suspense fallback={<div className={s.boot}><Spinner /></div>}>
-        <Routes>
-          <Route path="/" element={<Today profile={profile} onAdd={openAdd} />} />
-          <Route path="/gym/*" element={<Gym profile={profile} />} />
-          <Route path="/stats" element={<Stats profile={profile} />} />
-          <Route path="/profile" element={<ProfileScreen profile={profile} />} />
-        </Routes>
-      </Suspense>
+      <div className={s.status}>
+        <UpdateBar update={update} />
+        <OfflineBar />
+      </div>
 
-      <OfflineBar />
+      {/* Ошибка одного экрана не должна уносить всё приложение: таб-бар
+          остаётся, а переход на другой раздел снимает ошибку */}
+      <ErrorBoundary resetKey={location.pathname}>
+        <Suspense fallback={<div className={s.boot}><Spinner /></div>}>
+          <Routes>
+            <Route path="/" element={<Today profile={profile} onAdd={openAdd} />} />
+            <Route path="/gym/*" element={<Gym profile={profile} />} />
+            <Route path="/stats" element={<Stats profile={profile} />} />
+            <Route path="/profile" element={<ProfileScreen profile={profile} />} />
+            {/* Старая закладка или опечатка вела на пустой фон с одной
+                нижней панелью — теперь на главный экран */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
+
       <TabBar onAdd={() => openAdd('snack', dayKey())} />
 
       <AddFood

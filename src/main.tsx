@@ -10,6 +10,7 @@ import { ThemeProvider } from './app/theme'
 import { ToastProvider } from './ui/Toast'
 import { Backdrop } from './app/Backdrop'
 import { App } from './app/App'
+import { ErrorBoundary } from './app/ErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -17,7 +18,11 @@ createRoot(document.getElementById('root')!).render(
       <Backdrop />
       <ToastProvider>
         <BrowserRouter>
-          <App />
+          {/* Последний рубеж: без него любая ошибка отрисовки вне экранов —
+              заставка, панель добавления, онбординг — оставляла белый фон */}
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </BrowserRouter>
       </ToastProvider>
     </ThemeProvider>

@@ -1,5 +1,5 @@
-import type { WeightRecord } from './types'
-import { parseDay } from './dates'
+import type { Goal, WeightRecord } from './types'
+import { parseDay, plural } from './dates'
 
 const DAY_MS = 86_400_000
 
@@ -53,14 +53,70 @@ export function weeksToTarget(currentKg: number, targetKg: number, kgPerWeek: nu
   return Math.ceil(Math.abs(gap / kgPerWeek))
 }
 
+/**
+ * Дальше двух лет прогноз не показывается числом. Почти нулевой тренд
+ * (вес стоит) давал «≈ 460 месяцев» — формально верно, по сути бессмыслица.
+ */
+export const MAX_FORECAST_WEEKS = 104
+
 /** «≈ 3 недели» / «≈ 2 месяца» — люди не считают дни на десятки недель вперёд */
 export function humanWeeks(weeks: number): string {
   if (weeks <= 0) return 'вы у цели'
-  if (weeks === 1) return '≈ 1 неделя'
-  if (weeks < 5) return `≈ ${weeks} недели`
-  if (weeks < 9) return `≈ ${weeks} недель`
+  if (weeks > MAX_FORECAST_WEEKS) return 'больше двух лет'
+  if (weeks < 9) return `≈ ${weeks} ${plural(weeks, 'неделя', 'недели', 'недель')}`
   const months = Math.round(weeks / 4.35)
-  if (months === 1) return '≈ 1 месяц'
-  if (months < 5) return `≈ ${months} месяца`
-  return `≈ ${months} месяцев`
+  return `≈ ${months} ${plural(months, 'месяц', 'месяца', 'месяцев')}`
+}
+
+/** Темп из анкеты со знаком: минус — снижение, плюс — набор */
+export function planRate(goal: Goal, ratePerWeek: number): number {
+  if (goal === 'lose') return -ratePerWeek
+  if (goal === 'gain') return ratePerWeek
+  return 0
+}
+
+/** Сколько последних взвешиваний идёт в тренд для прогноза */
+export const FORECAST_POINTS = 10
+
+export interface GoalForecast {
+  /** Последний записанный вес */
+  currentKg: number
+  /** Сколько осталось до цели, кг, со знаком: минус — сбросить */
+  gapKg: number
+  /** Недель до цели; 0 — уже у цели, null — темп не ведёт к цели */
+  weeks: number | null
+  /** Темп, по которому считали, кг/нед со знаком */
+  rate: number
+  /** Откуда темп: тренд взвешиваний или план из анкеты */
+  basis: 'trend' | 'plan'
+}
+
+/**
+ * Прогноз «до цели» — один на всё приложение.
+ *
+ * Раньше «Сегодня» считал его по плану из анкеты, профиль — по тренду
+ * последних взвешиваний, а отчёты — по тренду внутри выбранного периода,
+ * и три экрана одновременно показывали три разных срока. Правило одно:
+ * тренд последних FORECAST_POINTS взвешиваний, а если по ним тренда ещё нет
+ * (мало точек или они слишком близко) — темп из анкеты.
+ *
+ * history — взвешивания по возрастанию даты, лучше всего weightHistory().
+ * null — взвешиваний нет, считать не от чего.
+ */
+export function goalForecast(
+  history: WeightRecord[],
+  targetKg: number,
+  plan: { goal: Goal; ratePerWeek: number },
+): GoalForecast | null {
+  const latest = history[history.length - 1]
+  if (!latest) return null
+  const trend = weeklyTrend(history.slice(-FORECAST_POINTS))
+  const rate = trend ?? planRate(plan.goal, plan.ratePerWeek)
+  return {
+    currentKg: latest.kg,
+    gapKg: targetKg - latest.kg,
+    weeks: weeksToTarget(latest.kg, targetKg, rate),
+    rate,
+    basis: trend === null ? 'plan' : 'trend',
+  }
 }

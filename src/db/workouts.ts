@@ -19,10 +19,32 @@ export async function deleteSet(id: string): Promise<void> {
   await db.sets.delete(id)
 }
 
+/** «Отменить» после удаления: подход возвращается с тем же id, датой и временем */
+export async function restoreSet(set: WorkoutSet): Promise<void> {
+  await db.sets.put(set)
+}
+
 /** Последние подходы упражнения, новые сверху */
 export async function setsForExercise(exerciseId: string, limit = 30): Promise<WorkoutSet[]> {
+  return (await exerciseLog(exerciseId, limit)).sets
+}
+
+/**
+ * Журнал упражнения: последние подходы для списка и рекорд за всё время.
+ *
+ * Рекорд считается по всем подходам, а не по показанным: иначе через
+ * восемь тренировок лучший старый подход выпадал из выборки, и «рекорд»
+ * тихо уменьшался, хотя его никто не бил. Запрос один — подходы
+ * упражнения всё равно читаются целиком, чтобы отсортировать их по времени.
+ */
+export async function exerciseLog(
+  exerciseId: string, limit = 30,
+): Promise<{ sets: WorkoutSet[]; best: WorkoutSet | null }> {
   const rows = await db.sets.where('exerciseId').equals(exerciseId).toArray()
-  return rows.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)
+  return {
+    sets: rows.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit),
+    best: bestSet(rows),
+  }
 }
 
 /** Подходы, сгруппированные по дате: сегодняшняя тренировка отдельно от прошлых */
