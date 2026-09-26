@@ -13,6 +13,13 @@ import s from './Backdrop.module.css'
  * Цвета — только из tokens.css (--glow-1…6), читаются при старте и при смене
  * темы. Геометрия и движение — здесь: дрейф по петле, дыхание и параллакс
  * от прокрутки (ближние пятна едут быстрее дальних).
+ *
+ * При «меньше движения» пятна стоят, но не замирают: их яркость медленно
+ * разгорается и гаснет, каждое в своём ритме. Раньше фон в этом режиме
+ * вставал целиком, а на Android его включает не только «Удалить анимацию»
+ * в спецвозможностях, но и энергосбережение у Samsung и Xiaomi — человек
+ * видел мёртвый фон и не знал почему. Смена яркости на месте — не движение:
+ * так и советуют заменять анимацию для этого режима.
  */
 
 const SCALE = 4
@@ -84,7 +91,10 @@ export function Backdrop() {
     const canvas = ref.current
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+    // Режим переключают на ходу (энергосбережение), поэтому слушаем, а не
+    // читаем один раз
+    const motionQuery = matchMedia('(prefers-reduced-motion: reduce)')
+    let reduce = motionQuery.matches
 
     let palette = readPalette()
     let blobs = document.documentElement.dataset.theme === 'light' ? LIGHT : DARK
@@ -99,16 +109,20 @@ export function Backdrop() {
     }
 
     const draw = (now: number) => {
-      const t = reduce ? 0 : (now - t0) / 1000
+      const t = (now - t0) / 1000
+      const move = reduce ? 0 : 1
       ctx.clearRect(0, 0, w, h)
       blobs.forEach((b, i) => {
         const [r, g, bl, a] = palette[i] ?? [0, 0, 0, 0]
         if (a === 0) return
         const ph = t * Math.PI * 2
         // Дрейф по петле Лиссажу: две частоты, чтобы путь не замыкался в круг
-        const x = (b.cx + b.dx * Math.sin(ph / b.period + b.phase)) * w
-        const y = (b.cy + b.dy * Math.sin(ph / (b.period * 0.7) + b.phase * 1.3) - sy * b.depth / innerHeight) * h
-        const grow = 1 + 0.14 * Math.sin(ph / b.breathe + b.phase * 2)
+        const x = (b.cx + move * b.dx * Math.sin(ph / b.period + b.phase)) * w
+        const y = (b.cy + move * b.dy * Math.sin(ph / (b.period * 0.7) + b.phase * 1.3) - sy * b.depth / innerHeight) * h
+        const grow = 1 + move * 0.14 * Math.sin(ph / b.breathe + b.phase * 2)
+        // Вместо движения — перелив: яркость от половины до полной, в ритме
+        // дрейфа, чтобы пятна не мигали хором
+        const glow = reduce ? 0.75 + 0.25 * Math.sin(ph / b.period + b.phase * 2) : 1
         // Пятно шире, а пик ниже, чем у исходного градиента: так blur(70px)
         // размазывал энергию, и без него цвета били бы в глаза
         const rx = b.rx * w * grow * 1.2
@@ -117,7 +131,7 @@ export function Backdrop() {
         ctx.translate(x, y)
         ctx.scale(rx, ry)
         const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
-        for (const [p, k] of STOPS) gr.addColorStop(p, `rgba(${r},${g},${bl},${(a * k).toFixed(3)})`)
+        for (const [p, k] of STOPS) gr.addColorStop(p, `rgba(${r},${g},${bl},${(a * k * glow).toFixed(3)})`)
         ctx.fillStyle = gr
         ctx.beginPath()
         ctx.arc(0, 0, 1, 0, Math.PI * 2)
@@ -130,14 +144,15 @@ export function Backdrop() {
       raf = requestAnimationFrame(frame)
       if (now - last < 1000 / FPS) return
       last = now
-      // Параллакс догоняет прокрутку с инерцией: фон тяжёлый
-      sy += (Math.max(0, scrollY) - sy) * 0.15
+      // Параллакс догоняет прокрутку с инерцией: фон тяжёлый. При «меньше
+      // движения» его нет — фон стоит, как бы ни листали
+      sy = reduce ? 0 : sy + (Math.max(0, scrollY) - sy) * 0.15
       draw(now)
     }
 
     const restart = () => {
       cancelAnimationFrame(raf)
-      if (reduce || document.hidden) draw(performance.now())
+      if (document.hidden) draw(performance.now())
       else raf = requestAnimationFrame(frame)
     }
 
@@ -154,12 +169,15 @@ export function Backdrop() {
     const onResize = () => { resize(); draw(performance.now()) }
     addEventListener('resize', onResize)
     document.addEventListener('visibilitychange', restart)
+    const onMotion = () => { reduce = motionQuery.matches; restart() }
+    motionQuery.addEventListener('change', onMotion)
 
     return () => {
       cancelAnimationFrame(raf)
       mo.disconnect()
       removeEventListener('resize', onResize)
       document.removeEventListener('visibilitychange', restart)
+      motionQuery.removeEventListener('change', onMotion)
     }
   }, [])
 
